@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+neo4j==5.27.0
+pydantic==2.10.4
+scikit-learn
+numpy
+# 重要: torch / transformers / sentence-transformers は default には含めない。
+# これらは重く、buildを遅くし、起動時にmodel DLを誘発するため。
+# semantic embedding と BERT sentiment を有効化したい場合のみ:
+#   pip install -r requirements-ml.txt
+# ML packageが無い環境では main.py が自動でfallback（lexicon sentiment /
+# CountVectorizer頻度keyword）に切り替わるため、アプリは動作し続ける。
