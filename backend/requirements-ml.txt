@@ -1,0 +1,7 @@
+# Optional ML extras. Install on top of requirements.txt to enable
+# semantic embeddings (sentence-transformers) and BERT sentiment (transformers).
+#   pip install -r requirements.txt -r requirements-ml.txt
+# 未インストールでも main.py は fallback で動作する。
+sentence-transformers
+transformers
+torch
