@@ -29,6 +29,14 @@ const TEXT_SOURCE_LABELS = {
   deliberating: 'Inner thought: deliberating',
 };
 
+// message type の visibility グループ分け。
+// backend の infer_visibility と一致させる:
+//   external = official_post channel もしくは public_post message_type。
+//   data 上 external な message_type は public_post のみなので、それを external グループに置く。
+// これにより旧「Internal / External」select を廃止し、Message types filter 1つに統合する。
+const EXTERNAL_MESSAGE_TYPES = ['public_post'];
+const visibilityGroupOf = (t) => (EXTERNAL_MESSAGE_TYPES.includes(t) ? 'external' : 'internal');
+
 // ============================================
 // Heatmap cell size (CSS変数的に1か所で管理)
 // ============================================
@@ -69,16 +77,18 @@ function fmtRoundLabel(hour) {
 // ============================================
 // 23 round の slider + Play/Pause。選択した round までを全ビューに累積反映する。
 // 下のミニ強度バーは round ごとの merger 関連メッセージ密度を示す（危機の高まりが一目でわかる）。
-function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, active, setActive, playing, onTogglePlay, granularity, setGranularity }) {
+function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, playing, onTogglePlay, granularity, setGranularity }) {
   if (!timeline || timeline.length === 0) return null;
   const cur = timeline[idx] || {};
   const startCur = timeline[startIdx] || {};
   const maxTotal = Math.max(1, ...timeline.map(r => r.total_msgs || 0));
+  // round ごとの merger 比率の最大値。sequential（白→濃い赤）ramp を全幅で使うための正規化基準。
+  const maxMergRatio = Math.max(0.0001, ...timeline.map(r => (r.total_msgs ? (r.merger_msgs || 0) / r.total_msgs : 0)));
   const n = timeline.length;
   const denom = Math.max(1, n - 1);
 
-  const onStart = (v) => { setActive(true); setStartIdx && setStartIdx(Math.min(Number(v), idx)); };
-  const onEnd = (v) => { setActive(true); setIdx(Math.max(Number(v), startIdx)); };
+  const onStart = (v) => { setStartIdx && setStartIdx(Math.min(Number(v), idx)); };
+  const onEnd = (v) => { setIdx(Math.max(Number(v), startIdx)); };
 
   // 選択範囲 [start, end] を 1 本のトラック上で塗る位置（%）
   const fillLeft = (startIdx / denom) * 100;
@@ -98,9 +108,12 @@ function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, acti
               const inRange = i >= startIdx && i <= idx;
               const h = 4 + 14 * Math.sqrt((r.total_msgs || 0) / maxTotal);
               const merg = (r.total_msgs ? (r.merger_msgs || 0) / r.total_msgs : 0);
-              const bg = merg > 0.02
-                ? `rgba(226,75,74,${0.35 + 0.6 * Math.min(1, merg)})`
-                : 'rgba(55,138,221,0.45)';
+              // sequential 単色 ramp: 白 (#ffffff, merger 低) → 濃い赤 (#8b0000, merger 高)。
+              const t = Math.pow(Math.min(1, merg / maxMergRatio), 0.7);
+              const cr = Math.round(255 + (0x8b - 255) * t);
+              const cg = Math.round(255 + (0x00 - 255) * t);
+              const cb = Math.round(255 + (0x00 - 255) * t);
+              const bg = `rgb(${cr},${cg},${cb})`;
               return (
                 <button key={i}
                   className={`tl-tick ${i === idx ? 'current' : ''} ${i === startIdx ? 'start' : ''} ${inRange ? 'in-range' : ''}`}
@@ -132,10 +145,6 @@ function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, acti
             </select>
           </label>
         )}
-
-        <label className="tl-toggle check" title="When on, the slider window controls the time range for the heatmap and line chart (and the network only if 'Apply heatmap sorting to network' is on).">
-          <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> drive views
-        </label>
       </div>
 
       <div className="tl-meta">
@@ -144,7 +153,6 @@ function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, acti
         {cur.stock_price_value != null && <span className="tl-stock">${Number(cur.stock_price_value).toFixed(2)}</span>}
         {cur.market_sentiment && <span className="tl-sent">{cur.market_sentiment}</span>}
         <span className="tl-merger">{cur.merger_msgs || 0} merger-related · {cur.total_msgs || 0} msgs (end round)</span>
-        {!active && <span className="tl-off">(timeline off — heatmap shows full range; network uses its own range)</span>}
       </div>
       {cur.event_headline && <div className="tl-headline">{cur.event_headline}</div>}
     </section>
@@ -413,7 +421,6 @@ function App() {
   const [mergerOnly, setMergerOnly] = useState(false);
   const [selectedMessageTypes, setSelectedMessageTypes] = useState([]);
   const [selectedTextSources, setSelectedTextSources] = useState([]);
-  const [visibility, setVisibility] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [agentFilter, setAgentFilter] = useState([]); // 空=All
 
@@ -425,7 +432,13 @@ function App() {
   // ---- network固有 state ----
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages', edgeWeight: 'weight' });
-  const [isNetworkFollowingHeatmapSort, setIsNetworkFollowingHeatmapSort] = useState(false);
+  const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
+  // network mode: 'independent' = 自前の filter + 自前の time range（animation なし）
+  //               'timeline'    = 自前の filter、ただし time window は crisis timeline 追従（play で animate）
+  //               'heatmap'     = filter / sort / time すべて heatmap を mirror
+  const [networkMode, setNetworkMode] = useState('independent');
+  const netMirrorsHeatmap = networkMode === 'heatmap';   // heatmap の filter/sort を採用するか
+  const netFollowsTimeline = networkMode !== 'independent'; // time window を timeline から取るか
   const [selectedNetworkNode, setSelectedNetworkNode] = useState(null);
 
   // network専用 filter（heatmapの計算には一切影響させない。networkだけに適用する）
@@ -451,7 +464,6 @@ function App() {
   const [timeline, setTimeline] = useState([]);          // [{idx,hour,cutoff,event_headline,total_msgs,merger_msgs,...}]
   const [timelineStartIdx, setTimelineStartIdx] = useState(0); // 窓の開始 round（前から絞る handle）
   const [timelineIdx, setTimelineIdx] = useState(0);     // 窓の終了 round（先から絞る handle / play で進む）
-  const [timelineActive, setTimelineActive] = useState(true); // true: slider が heatmap/network/line-chart の時間窓を支配
   const [playing, setPlaying] = useState(false);
 
   // ---- データ ----
@@ -487,10 +499,10 @@ function App() {
   //  - end  = 終了 round の cutoff（その round までを含む）
   //  - start = 開始 round の hour（前から絞る。startIdx==0 のときは空=最初から）
   // ============================================
-  const timelineEnd = (timelineActive && timeline.length && timeline[timelineIdx])
+  const timelineEnd = (timeline.length && timeline[timelineIdx])
     ? (timeline[timelineIdx].cutoff || timeline[timelineIdx].hour || '')
     : '';
-  const timelineStart = (timelineActive && timeline.length && timelineStartIdx > 0 && timeline[timelineStartIdx])
+  const timelineStart = (timeline.length && timelineStartIdx > 0 && timeline[timelineStartIdx])
     ? (timeline[timelineStartIdx].hour || '')
     : '';
 
@@ -498,17 +510,14 @@ function App() {
     const p = new URLSearchParams();
     p.set('granularity', granularity);
     p.set('merger_only', mergerOnly ? 'true' : 'false');
-    p.set('visibility', visibility);
     selectedMessageTypes.forEach(t => p.append('message_types', t));
     selectedTextSources.forEach(s => p.append('text_sources', s));
-    // Heatmap の時間窓は crisis timeline のみが支配する（手動 time range は廃止）。
-    if (timelineActive) {
-      if (timelineStart) p.set('start_time', timelineStart);
-      if (timelineEnd) p.set('end_time', timelineEnd);
-    }
+    // Heatmap の時間窓は crisis timeline が常に支配する（手動 time range は廃止）。
+    if (timelineStart) p.set('start_time', timelineStart);
+    if (timelineEnd) p.set('end_time', timelineEnd);
     if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
     return p.toString();
-  }, [granularity, mergerOnly, selectedMessageTypes, selectedTextSources, visibility, searchKeyword, timelineActive, timelineStart, timelineEnd]);
+  }, [granularity, mergerOnly, selectedMessageTypes, selectedTextSources, searchKeyword, timelineStart, timelineEnd]);
 
   // ============================================
   // network専用のquery string（heatmapとは独立。networkだけに効く）
@@ -518,32 +527,34 @@ function App() {
     const p = new URLSearchParams();
     p.set('granularity', granularity);
 
-    if (isNetworkFollowingHeatmapSort) {
-      // ON: heatmap の filter context を採用し、時間窓も timeline に追従する
-      //（play で network のエージェント増減アニメーションが動くのはこの時だけ）。
+    // --- filter context ---
+    if (netMirrorsHeatmap) {
+      // 'heatmap': heatmap の filter context をそのまま採用する。
       p.set('merger_only', mergerOnly ? 'true' : 'false');
-      p.set('visibility', visibility);
       selectedMessageTypes.forEach(t => p.append('message_types', t));
       selectedTextSources.forEach(s => p.append('text_sources', s));
       if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
-      if (timelineActive) {
-        if (timelineStart) p.set('start_time', timelineStart);
-        if (timelineEnd) p.set('end_time', timelineEnd);
-      }
     } else {
-      // OFF: network は heatmap / crisis timeline から完全に独立。
-      // sync を押していないときは crisis timeline の時間窓を一切適用せず、
-      // network 専用の手動 time range（未設定なら全期間）だけを使う。
+      // 'independent' / 'timeline': network 専用 filter を使う。
       p.set('merger_only', netMergerOnly ? 'true' : 'false');
       netMessageTypes.forEach(t => p.append('message_types', t));
+    }
+
+    // --- time window ---
+    if (netFollowsTimeline) {
+      // 'timeline' / 'heatmap': crisis timeline の窓に追従する（play で animate）。
+      if (timelineStart) p.set('start_time', timelineStart);
+      if (timelineEnd) p.set('end_time', timelineEnd);
+    } else {
+      // 'independent': network 専用の手動 time range（未設定なら全期間）。
       if (netStartTime) p.set('start_time', inputValueToApiTime(netStartTime));
       if (netEndTime) p.set('end_time', inputValueToApiTime(netEndTime));
     }
     return p.toString();
-  }, [granularity, isNetworkFollowingHeatmapSort,
-      mergerOnly, visibility, selectedMessageTypes, selectedTextSources, searchKeyword,
+  }, [granularity, netMirrorsHeatmap, netFollowsTimeline,
+      mergerOnly, selectedMessageTypes, selectedTextSources, searchKeyword,
       netMergerOnly, netMessageTypes, netStartTime, netEndTime,
-      timelineActive, timelineStart, timelineEnd]);
+      timelineStart, timelineEnd]);
 
   // ============================================
   // データ取得
@@ -636,7 +647,6 @@ function App() {
 
   const togglePlay = () => {
     if (!timeline.length) return;
-    setTimelineActive(true);
     // 再生開始時、終了 handle が末尾なら開始 handle まで巻き戻して窓を成長させる
     if (!playing && timelineIdx >= timeline.length - 1) setTimelineIdx(timelineStartIdx);
     setPlaying(p => !p);
@@ -693,9 +703,54 @@ function App() {
   // ============================================
   // toggles
   // ============================================
-  const toggleMessageType = (t) => setSelectedMessageTypes(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
-  const toggleTextSource = (s) => setSelectedTextSources(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
-  const toggleAgent = (id) => setAgentFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  // 「空配列 = All（全選択）」モデルの共通ヘルパ。
+  //   - ある項目が有効か: 空 = 全有効。
+  //   - 個別トグル: All 状態から1つ外すと「全項目選択 → その1つを除外」に展開。
+  //     全選択に戻ったら空配列に正規化して、All checkbox と見た目を一致させる。
+  const isInSet = (selection, item) => selection.length === 0 || selection.includes(item);
+  const toggleInSet = (setter, allItems, item) => setter(prev => {
+    const base = prev.length === 0 ? allItems.slice() : prev.slice();
+    let next = base.includes(item) ? base.filter(x => x !== item) : [...base, item];
+    if (allItems.length && allItems.every(x => next.includes(x))) next = []; // 全選択 → All
+    return next;
+  });
+  const agentIds = () => (options.agents || []).map(a => a.agent_id);
+
+  const toggleMessageType = (t) => toggleInSet(setSelectedMessageTypes, options.message_types || [], t);
+  const toggleTextSource = (s) => toggleInSet(setSelectedTextSources, options.text_sources || Object.keys(TEXT_SOURCE_LABELS), s);
+
+  // message types を visibility（internal / external）でグループ化する。
+  // 空配列 = 全 type 選択（= All）なので、グループ補助 UI もそれを踏まえて表示する。
+  const messageTypesByGroup = useMemo(() => {
+    const all = options.message_types || [];
+    return {
+      external: all.filter(t => visibilityGroupOf(t) === 'external'),
+      internal: all.filter(t => visibilityGroupOf(t) === 'internal'),
+    };
+  }, [options.message_types]);
+
+  // 「空配列 = All」を考慮して、ある type が実際に有効か判定する。
+  const isTypeActive = (t) => selectedMessageTypes.length === 0 || selectedMessageTypes.includes(t);
+
+  // グループ内の type が全部有効か（空配列=All も全有効として扱う）。
+  const isGroupAllActive = (groupTypes) => groupTypes.length > 0 && groupTypes.every(isTypeActive);
+
+  // グループ単位のトグル。空配列(All)状態から個別操作するときは、
+  // まず全 type を明示選択した状態に展開してから差分を適用する。
+  const toggleGroup = (groupTypes) => {
+    const allTypes = options.message_types || [];
+    setSelectedMessageTypes(prev => {
+      const base = prev.length === 0 ? allTypes.slice() : prev.slice();
+      const allOn = groupTypes.every(t => base.includes(t));
+      let next = allOn
+        ? base.filter(t => !groupTypes.includes(t))   // グループ全 off
+        : Array.from(new Set([...base, ...groupTypes])); // グループ全 on
+      // 結果が全 type なら空配列(All)に正規化して見た目を揃える。
+      if (allTypes.length && allTypes.every(t => next.includes(t))) next = [];
+      return next;
+    });
+  };
+  const toggleAgent = (id) => toggleInSet(setAgentFilter, agentIds(), id);
 
   // ============================================
   // Heatmap と Line Chart の横スクロール同期
@@ -716,8 +771,8 @@ function App() {
   const handleLineScroll = () => mirrorScroll(lineScrollRef.current, heatmapScrollRef.current);
 
   // network専用 filter の toggle / helper（heatmapには影響しない）
-  const toggleNetMessageType = (t) => setNetMessageTypes(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
-  const toggleNetAgent = (id) => setNetAgentFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const toggleNetMessageType = (t) => toggleInSet(setNetMessageTypes, options.message_types || [], t);
+  const toggleNetAgent = (id) => toggleInSet(setNetAgentFilter, agentIds(), id);
   const useFullNetTimeRange = () => { setNetStartTime(apiTimeToInputValue(options.min_time)); setNetEndTime(apiTimeToInputValue(options.max_time)); };
   const clearNetTimeRange = () => { setNetStartTime(''); setNetEndTime(''); };
 
@@ -727,23 +782,23 @@ function App() {
     // heatmap filters
     setSearchKeyword('');
     setMergerOnly(false);
-    setVisibility('all');
     setSelectedMessageTypes([]);
     setSelectedTextSources([]);
     setAgentFilter([]);
     setHeatmapSort({ key: 'agent_id', dir: 'asc' });
     // network filters
-    setIsNetworkFollowingHeatmapSort(false);
+    setNetworkMode('independent');
+    setNetworkSort({ nodeSize: 'messages', edgeWeight: 'weight' });
+    setColorBySentiment(false);
     setNetMergerOnly(false);
     setNetMessageTypes([]);
     setNetAgentFilter([]);
     setNetStartTime('');
     setNetEndTime('');
-    // crisis timeline → 全期間に戻す（active のまま）
+    // crisis timeline → 全期間に戻す
     setPlaying(false);
     setTimelineStartIdx(0);
     if (timeline.length) setTimelineIdx(timeline.length - 1);
-    setTimelineActive(true);
   };
 
   // ============================================
@@ -811,10 +866,10 @@ function App() {
   }
 
   // network に渡す実効 node-size metric。
-  // isNetworkFollowingHeatmapSort === true のときは heatmap の sort key を node size にマップする。
+  // 'heatmap' mode のときは heatmap の sort key を node size にマップする。
   //   sentiment -> |sentiment| サイズ、それ以外（agent_id / total）-> messages サイズ。
   //   ※ agent_id は名前順なので「大きさ」を持たない。順序は heatmap rank chip で可視化する。
-  const effectiveNetworkSize = isNetworkFollowingHeatmapSort
+  const effectiveNetworkSize = netMirrorsHeatmap
     ? ({ agent_id: 'messages', total: 'messages', sentiment: 'sentiment' }[heatmapSort.key] || 'messages')
     : networkSort.nodeSize;
 
@@ -829,12 +884,12 @@ function App() {
   // Agent type filter は network 側だけで client-side に適用する（heatmap非干渉）。
   // node を絞ると、NetworkVisualization 側が dangling edge を自動的に落とす。
   const displayNetwork = useMemo(() => {
-    if (isNetworkFollowingHeatmapSort || !netAgentFilter.length) return network;
+    if (netMirrorsHeatmap || !netAgentFilter.length) return network;
     const keep = new Set(netAgentFilter);
     const nodes = (network.nodes || []).filter(n => keep.has(n.id));
     const edges = (network.edges || []).filter(e => keep.has(e.source) && keep.has(e.target));
     return { ...network, nodes, edges };
-  }, [network, netAgentFilter, isNetworkFollowingHeatmapSort]);
+  }, [network, netAgentFilter, netMirrorsHeatmap]);
 
   const cell = CELL[granularity];
   const buckets = heatmap.time_buckets || [];
@@ -865,17 +920,6 @@ function App() {
           title="Reset every filter (heatmap + network + crisis timeline) to defaults. View modes like Daily/Hourly are kept.">
           Clear all filters
         </button>
-        <button
-          type="button"
-          className="flow-btn gc-flow-btn"
-          disabled={!selectedMessageId}
-          title={selectedMessageId
-            ? 'Show the reconstructed conversation flow for the selected message'
-            : 'Select a message (click a heatmap cell, then a message) to view its conversation flow'}
-          onClick={() => selectedMessageId && setFlowOpen(true)}
-        >
-          ⇄ Conversation Flow
-        </button>
         <div className="gc-counts">
           Merger-related keyword: <b>{options.combined_merger_count}</b> / {options.total_count}
           {' · '}Content: {options.merger_count} {' · '}Inner thought: {options.internal_merger_count}
@@ -892,8 +936,6 @@ function App() {
         setIdx={setTimelineIdx}
         startIdx={timelineStartIdx}
         setStartIdx={setTimelineStartIdx}
-        active={timelineActive}
-        setActive={setTimelineActive}
         playing={playing}
         onTogglePlay={togglePlay}
         granularity={granularity}
@@ -953,31 +995,55 @@ function App() {
                 </Collapsible>
 
                 <Collapsible title="Message types" defaultOpen={false}>
-                  <div className="type-grid">
-                    <label className="check"><input type="checkbox" checked={selectedMessageTypes.length === 0} onChange={() => setSelectedMessageTypes([])} /> All</label>
-                    {(options.message_types || []).map(t => (
-                      <label className="check" key={t}><input type="checkbox" checked={selectedMessageTypes.includes(t)} onChange={() => toggleMessageType(t)} /> {t}</label>
-                    ))}
-                  </div>
+                  <label className="check select-all-row"><input type="checkbox" checked={selectedMessageTypes.length === 0} onChange={() => setSelectedMessageTypes([])} /> All</label>
+
+                  {messageTypesByGroup.external.length > 0 && (
+                    <div className="type-group">
+                      <label className="check group-head">
+                        <input
+                          type="checkbox"
+                          checked={isGroupAllActive(messageTypesByGroup.external)}
+                          onChange={() => toggleGroup(messageTypesByGroup.external)}
+                        />
+                        External <span className="muted small">(public-facing)</span>
+                      </label>
+                      <div className="type-grid indent">
+                        {messageTypesByGroup.external.map(t => (
+                          <label className="check" key={t}><input type="checkbox" checked={isTypeActive(t)} onChange={() => toggleMessageType(t)} /> {t}</label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {messageTypesByGroup.internal.length > 0 && (
+                    <div className="type-group">
+                      <label className="check group-head">
+                        <input
+                          type="checkbox"
+                          checked={isGroupAllActive(messageTypesByGroup.internal)}
+                          onChange={() => toggleGroup(messageTypesByGroup.internal)}
+                        />
+                        Internal <span className="muted small">(in-org conversation)</span>
+                      </label>
+                      <div className="type-grid indent">
+                        {messageTypesByGroup.internal.map(t => (
+                          <label className="check" key={t}><input type="checkbox" checked={isTypeActive(t)} onChange={() => toggleMessageType(t)} /> {t}</label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </Collapsible>
 
                 <Collapsible title="Text sources" defaultOpen={false}>
+                  <label className="check select-all-row"><input type="checkbox" checked={selectedTextSources.length === 0} onChange={() => setSelectedTextSources([])} /> All</label>
                   <div className="type-grid">
-                    <label className="check"><input type="checkbox" checked={selectedTextSources.length === 0} onChange={() => setSelectedTextSources([])} /> All</label>
                     {(options.text_sources || Object.keys(TEXT_SOURCE_LABELS)).map(s => (
-                      <label className="check" key={s}><input type="checkbox" checked={selectedTextSources.includes(s)} onChange={() => toggleTextSource(s)} /> {TEXT_SOURCE_LABELS[s] || s}</label>
+                      <label className="check" key={s}><input type="checkbox" checked={isInSet(selectedTextSources, s)} onChange={() => toggleTextSource(s)} /> {TEXT_SOURCE_LABELS[s] || s}</label>
                     ))}
                   </div>
                 </Collapsible>
 
-                <Collapsible title="Visibility & merger" defaultOpen={false}>
-                  <label>Internal / external
-                    <select value={visibility} onChange={e => setVisibility(e.target.value)}>
-                      <option value="all">All</option>
-                      <option value="internal">Internal</option>
-                      <option value="external">External</option>
-                    </select>
-                  </label>
+                <Collapsible title="Merger" defaultOpen={false}>
                   <label className="check merger-check">
                     <input type="checkbox" checked={mergerOnly} onChange={e => setMergerOnly(e.target.checked)} />
                     Merger-related only in selected text sources
@@ -985,11 +1051,11 @@ function App() {
                 </Collapsible>
 
                 <Collapsible title="Agents" defaultOpen={false}>
+                  <label className="check select-all-row"><input type="checkbox" checked={agentFilter.length === 0} onChange={() => setAgentFilter([])} /> All</label>
                   <div className="type-grid">
-                    <label className="check"><input type="checkbox" checked={agentFilter.length === 0} onChange={() => setAgentFilter([])} /> All</label>
                     {(options.agents || []).map(a => (
                       <label className="check" key={a.agent_id}>
-                        <input type="checkbox" checked={agentFilter.includes(a.agent_id)} onChange={() => toggleAgent(a.agent_id)} />
+                        <input type="checkbox" checked={isInSet(agentFilter, a.agent_id)} onChange={() => toggleAgent(a.agent_id)} />
                         <span className="agent-dot" style={{ background: AGENTS[a.agent_id]?.color || '#888' }} /> {a.agent_label}
                       </label>
                     ))}
@@ -1163,25 +1229,21 @@ function App() {
                 <div className="muted small">These filters apply to the network only — they don't change heatmap calculations.</div>
 
                 <Collapsible title="Network filters" defaultOpen={true}>
-                  {isNetworkFollowingHeatmapSort && <div className="muted small">Following heatmap — these network filters are taken from the heatmap.</div>}
-                  <div className={isNetworkFollowingHeatmapSort ? 'disabled' : ''}>
+                  {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — these network filters are taken from the heatmap.</div>}
+                  <div className={netMirrorsHeatmap ? 'disabled' : ''}>
                   <div className="control-title">Message type</div>
+                  <label className="check select-all-row"><input type="checkbox" checked={netMessageTypes.length === 0} onChange={() => setNetMessageTypes([])} /> All</label>
                   <div className="type-grid">
-                    <label className="check"><input type="checkbox" checked={netMessageTypes.length === 0} onChange={() => setNetMessageTypes([])} /> All</label>
                     {(options.message_types || []).map(t => (
-                      <label className="check" key={`net-${t}`}><input type="checkbox" checked={netMessageTypes.includes(t)} onChange={() => toggleNetMessageType(t)} /> {t}</label>
+                      <label className="check" key={`net-${t}`}><input type="checkbox" checked={isInSet(netMessageTypes, t)} onChange={() => toggleNetMessageType(t)} /> {t}</label>
                     ))}
                   </div>
-                  <label className="check merger-check">
-                    <input type="checkbox" checked={netMergerOnly} onChange={e => setNetMergerOnly(e.target.checked)} />
-                    Merger-related keyword only
-                  </label>
                   <div className="control-title">Agent type</div>
+                  <label className="check select-all-row"><input type="checkbox" checked={netAgentFilter.length === 0} onChange={() => setNetAgentFilter([])} /> All</label>
                   <div className="type-grid">
-                    <label className="check"><input type="checkbox" checked={netAgentFilter.length === 0} onChange={() => setNetAgentFilter([])} /> All</label>
                     {(options.agents || []).map(a => (
                       <label className="check" key={`net-a-${a.agent_id}`}>
-                        <input type="checkbox" checked={netAgentFilter.includes(a.agent_id)} onChange={() => toggleNetAgent(a.agent_id)} />
+                        <input type="checkbox" checked={isInSet(netAgentFilter, a.agent_id)} onChange={() => toggleNetAgent(a.agent_id)} />
                         <span className="agent-dot" style={{ background: AGENTS[a.agent_id]?.color || '#888' }} /> {a.agent_label}
                       </label>
                     ))}
@@ -1189,41 +1251,49 @@ function App() {
                   </div>
                 </Collapsible>
 
+                <Collapsible title="Merger" defaultOpen={false}>
+                  {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — taken from the heatmap.</div>}
+                  <label className={`check merger-check ${netMirrorsHeatmap ? 'disabled' : ''}`}>
+                    <input type="checkbox" checked={netMergerOnly} disabled={netMirrorsHeatmap}
+                      onChange={e => setNetMergerOnly(e.target.checked)} />
+                    Merger-related keyword only
+                  </label>
+                </Collapsible>
+
                 <Collapsible title="Time range / sorting" defaultOpen={false}>
-                  {isNetworkFollowingHeatmapSort
-                    ? <div className="muted small">Time window comes from the heatmap / crisis timeline (network is synced). Click “Synced with heatmap” above the graph to unlink and set a network-only range here.</div>
+                  {netFollowsTimeline
+                    ? <div className="muted small">Time window follows the crisis timeline ({networkMode === 'heatmap' ? 'heatmap mirror' : 'Follow timeline'} mode) — press Play above to animate. Switch to “Independent” above the graph to set a network-only range here.</div>
                     : <div className="muted small">Network-only time range. Independent of the heatmap and crisis timeline. Leave empty for the full range.</div>}
-                  <div className={`time-inputs ${isNetworkFollowingHeatmapSort ? 'disabled' : ''}`}>
+                  <div className={`time-inputs ${netFollowsTimeline ? 'disabled' : ''}`}>
                     <label>Start<input type="datetime-local" value={netStartTime} onChange={e => setNetStartTime(e.target.value)} /></label>
                     <label>End<input type="datetime-local" value={netEndTime} onChange={e => setNetEndTime(e.target.value)} /></label>
                   </div>
-                  <div className={`time-actions ${isNetworkFollowingHeatmapSort ? 'disabled' : ''}`}>
+                  <div className={`time-actions ${netFollowsTimeline ? 'disabled' : ''}`}>
                     <button onClick={useFullNetTimeRange}>Use full range</button>
                     <button onClick={clearNetTimeRange}>Clear</button>
                   </div>
-                  {isNetworkFollowingHeatmapSort
-                    ? <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}) and follows the crisis timeline. Node numbers #1…#N follow the heatmap row order. Use the “Synced with heatmap” button above the graph to unlink.</div>
-                    : <div className="muted small">Tip: use the “Sync with heatmap sorting” button above the graph to mirror the heatmap’s filters & order here.</div>}
+                  {netMirrorsHeatmap
+                    ? <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}) and follows the crisis timeline. Node numbers #1…#N follow the heatmap row order.</div>
+                    : netFollowsTimeline
+                      ? <div className="muted small">“Follow timeline” keeps your own network filters while the time window tracks the crisis timeline.</div>
+                      : <div className="muted small">Tip: use the mode selector above the graph to follow the timeline or mirror the heatmap.</div>}
                 </Collapsible>
 
-                <Collapsible title="Node & edge metrics" defaultOpen={true}>
-                  <div className={isNetworkFollowingHeatmapSort ? 'disabled' : ''}>
+                <Collapsible title="Node metric" defaultOpen={true}>
+                  <div className={netMirrorsHeatmap ? 'disabled' : ''}>
                     <div className="control-title">Node size metric</div>
                     <div className="seg">
-                      {[['messages', 'Messages'], ['merger', 'Merger'], ['sentiment', 'Sentiment']].map(([v, l]) => (
-                        <button key={v} disabled={isNetworkFollowingHeatmapSort}
+                      {[['messages', 'Messages'], ['merger', 'Merger']].map(([v, l]) => (
+                        <button key={v} disabled={netMirrorsHeatmap}
                           className={`seg-btn ${networkSort.nodeSize === v ? 'on' : ''}`}
                           onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
                       ))}
                     </div>
-                    <div className="control-title">Edge weight metric</div>
-                    <div className="seg">
-                      {[['weight', 'Replies'], ['merger', 'Merger replies']].map(([v, l]) => (
-                        <button key={v} disabled={isNetworkFollowingHeatmapSort}
-                          className={`seg-btn ${networkSort.edgeWeight === v ? 'on' : ''}`}
-                          onClick={() => setNetworkSort(s => ({ ...s, edgeWeight: v }))}>{l}</button>
-                      ))}
-                    </div>
+                    <label className="check" style={{ marginTop: 8 }}>
+                      <input type="checkbox" checked={colorBySentiment} disabled={netMirrorsHeatmap}
+                        onChange={e => setColorBySentiment(e.target.checked)} />
+                      Color nodes by sentiment
+                    </label>
                   </div>
                 </Collapsible>
 
@@ -1262,31 +1332,40 @@ function App() {
                   <h2>Communication network (reply graph)</h2>
                   <span className="muted small">{displayNetwork.nodes?.length || 0} agents · {displayNetwork.edges?.length || 0} edges</span>
                 </div>
-                <button
-                  type="button"
-                  className={`sync-btn ${isNetworkFollowingHeatmapSort ? 'on' : ''}`}
-                  onClick={() => setIsNetworkFollowingHeatmapSort(v => !v)}
-                  title="Apply the heatmap's sorting & filters to the network"
-                >
-                  {isNetworkFollowingHeatmapSort ? '✓ Synced with heatmap (click to unlink)' : '⤭ Sync with heatmap sorting'}
-                </button>
+                <div className="seg netmode-seg" role="group" aria-label="Network mode">
+                  {[
+                    ['independent', 'Independent', 'Network uses its own filters and its own time range (no timeline animation).'],
+                    ['timeline', 'Follow timeline', 'Network keeps its own filters, but the time window follows the crisis timeline — press Play to animate.'],
+                    ['heatmap', 'Mirror heatmap', "Network mirrors the heatmap's filters, sort order and time window."],
+                  ].map(([v, l, tip]) => (
+                    <button key={v} type="button" title={tip}
+                      className={`seg-btn ${networkMode === v ? 'on' : ''}`}
+                      onClick={() => setNetworkMode(v)}>{l}</button>
+                  ))}
+                </div>
               </div>
               <NetworkVisualization
                 data={displayNetwork}
                 layout={networkLayout}
                 sizeMetric={effectiveNetworkSize}
-                edgeMetric={isNetworkFollowingHeatmapSort ? 'weight' : networkSort.edgeWeight}
+                edgeMetric={netMirrorsHeatmap ? 'weight' : networkSort.edgeWeight}
+                colorBySentiment={netMirrorsHeatmap ? heatmapSort.key === 'sentiment' : colorBySentiment}
                 selectedNode={selectedNetworkNode}
                 onSelectNode={setSelectedNetworkNode}
-                followingHeatmapSort={isNetworkFollowingHeatmapSort}
+                followingHeatmapSort={netMirrorsHeatmap}
                 heatmapOrder={heatmapOrder}
                 heatmapSortKey={heatmapSort.key}
                 heatmapSortDir={heatmapSort.dir}
               />
-              {isNetworkFollowingHeatmapSort && (
+              {netMirrorsHeatmap && (
                 <div className="muted small net-follow-note">
-                  Following heatmap: filters mirrored · node size = {effectiveNetworkSize} ·
+                  Mirroring heatmap: filters mirrored · node size = {effectiveNetworkSize} ·
                   {' '}numbered #1…#{heatmapOrder.length} by {{ agent_id: 'agent name', total: 'total messages', sentiment: 'mean sentiment' }[heatmapSort.key]} ({heatmapSort.dir})
+                </div>
+              )}
+              {networkMode === 'timeline' && (
+                <div className="muted small net-follow-note">
+                  Following timeline: your network filters apply · time window = current crisis-timeline round range · press Play above to animate.
                 </div>
               )}
             </div>
@@ -1313,8 +1392,6 @@ function MessageDetailPanel({ selected, selectedCellData, selectedSemantic, sema
     return <div className="detail-card empty"><span className="muted">Click a heatmap cell or a time header to see its messages here.</span></div>;
   }
   const count = selectedCellData?.message_count ?? messages.length;
-  const sent = selectedCellData?.bert_sentiment_score;
-
   return (
     <div className="detail-card">
       <div className="detail-summary" onClick={() => setCollapsed(c => !c)}>
@@ -1325,8 +1402,6 @@ function MessageDetailPanel({ selected, selectedCellData, selectedSemantic, sema
           <b>{selected.agent.agent_label}</b>
           <span className="ds-pipe">|</span> {selected.bucket}
           <span className="ds-pipe">|</span> {count} messages
-          <span className="ds-pipe">|</span> BERT: {sent == null ? '—' : sent.toFixed(2)}
-          <span className="ds-pipe">|</span> Semantic Δ (vs previous): {selectedSemantic == null ? '—' : selectedSemantic.toFixed(2)}
         </div>
         <span className="ds-hint">{collapsed ? 'Expand messages' : 'Collapse'}</span>
       </div>

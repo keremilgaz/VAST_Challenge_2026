@@ -81,6 +81,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .row select { flex: 1; min-width: 0; }
 .type-grid { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .type-grid .check { font-size: 13px; }
+/* "All" を個別項目の上に置く master 行（下に区切り線を引いて「全体を包む」見た目に） */
+.select-all-row { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+  padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid #1f2c47; }
+.type-group { margin-top: 8px; }
+.type-group .group-head { font-size: 13px; font-weight: 600; }
+.type-grid.indent { margin: 4px 0 2px 18px; }
 .agent-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
 .time-inputs { display: flex; flex-direction: column; gap: 8px; }
 .time-inputs input { width: 100%; }
@@ -95,6 +101,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .seg-btn.on { background: #378ADD; color: #fff; font-weight: 600; }
 .seg-btn:disabled { cursor: not-allowed; }
 /* vertical stack variant: each option on its own full-width row (no text overlap in narrow sidebar) */
+.netmode-seg { flex: 0 0 auto; }
+.netmode-seg .seg-btn { flex: 0 0 auto; min-width: auto; }
 .seg-stack { flex-direction: column; flex-wrap: nowrap; }
 .seg-stack .seg-btn { flex: none; width: 100%; text-align: left; }
 
@@ -344,6 +352,8 @@ summary { cursor: pointer; }
 .collapsible-body { display: flex; flex-direction: column; gap: 11px; padding: 12px; }
 .sub-control { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #233044; }
 .collapsible .control-title { margin-top: 2px; }
+/* 直前にリストがある control-title（例: AGENT TYPE）は上に余白を足して詰まりを防ぐ */
+.type-grid + .control-title { margin-top: 14px; }
 .collapsible .disabled { opacity: 0.45; pointer-events: none; }
 
 /* ---- line chart legend ---- */
@@ -402,7 +412,7 @@ summary { cursor: pointer; }
 .tl-range-multi { position: relative; height: 20px; }
 .tl-track { position: absolute; top: 9px; left: 0; width: 100%; height: 4px; border-radius: 3px; background: #1b2a3f; }
 .tl-track-fill { position: absolute; top: 9px; height: 4px; border-radius: 3px;
-  background: linear-gradient(90deg, #22c55e, #378ADD); pointer-events: none; }
+  background: #22c55e; pointer-events: none; }
 .tl-range-multi input[type="range"] {
   position: absolute; top: 0; left: 0; width: 100%; height: 20px; margin: 0;
   -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none;
@@ -420,8 +430,8 @@ summary { cursor: pointer; }
 }
 .tl-range-start::-webkit-slider-thumb { background: #22c55e; }
 .tl-range-start::-moz-range-thumb { background: #22c55e; }
-.tl-range-end::-webkit-slider-thumb { background: #378ADD; }
-.tl-range-end::-moz-range-thumb { background: #378ADD; }
+.tl-range-end::-webkit-slider-thumb { background: #22c55e; }
+.tl-range-end::-moz-range-thumb { background: #22c55e; }
 
 .tl-scale { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #9fb2c8; flex: none; }
 .tl-scale select { background: #101a28; color: #d4dee9; border: 1px solid #2c3a52; border-radius: 7px; padding: 3px 6px; font-size: 11px; }

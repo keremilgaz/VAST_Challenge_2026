@@ -75,6 +75,7 @@ export default function NetworkVisualization({
   layout = 'force',
   sizeMetric = 'messages',
   edgeMetric = 'weight',
+  colorBySentiment = false,
   selectedNode,
   onSelectNode,
   followingHeatmapSort = false,
@@ -90,30 +91,31 @@ export default function NetworkVisualization({
     const nodes = (data?.nodes || []).map(n => ({ ...n }));
     const rawEdges = data?.edges || [];
 
+    const DUR = 480; // enter/update/exit アニメ時間（play は 1s 間隔なので余裕を持って収まる）
+
     const svg = d3.select(svgRef.current);
-    svg.selectAll('*').remove();
 
-    const gMain = svg.append('g').attr('class', 'net-main');
-    const gGrid = gMain.append('g').attr('class', 'net-grid');
-    const gEdges = gMain.append('g').attr('class', 'net-edges');
-    const gNodes = gMain.append('g').attr('class', 'net-nodes');
-
-    const dots = [];
-    for (let x = 20; x < W; x += 32) for (let y = 14; y < H; y += 32) dots.push({ x, y });
-    gGrid.selectAll('circle').data(dots).enter().append('circle')
-      .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', 1).attr('fill', '#151F2E');
-
-    const zoom = d3.zoom().scaleExtent([0.3, 4]).on('zoom', ev => {
-      gMain.attr('transform', ev.transform);
-    });
-    svg.call(zoom);
-
-    if (!nodes.length) {
-      gMain.append('text').attr('x', W / 2).attr('y', H / 2)
-        .attr('text-anchor', 'middle').attr('fill', '#5a7a9a')
-        .attr('font-size', 14).text('No agents match the current filters.');
-      return;
+    // ── scaffold は初回のみ構築し、以降は再利用（毎フレーム全消去せず差分だけアニメ）──
+    let gMain = svg.select('g.net-main');
+    if (gMain.empty()) {
+      gMain = svg.append('g').attr('class', 'net-main');
+      const gGrid = gMain.append('g').attr('class', 'net-grid');
+      gMain.append('g').attr('class', 'net-edges');
+      gMain.append('g').attr('class', 'net-nodes');
+      gMain.append('text').attr('class', 'net-empty')
+        .attr('x', W / 2).attr('y', H / 2).attr('text-anchor', 'middle')
+        .attr('fill', '#5a7a9a').attr('font-size', 14)
+        .style('display', 'none').text('No agents match the current filters.');
+      const dots = [];
+      for (let x = 20; x < W; x += 32) for (let y = 14; y < H; y += 32) dots.push({ x, y });
+      gGrid.selectAll('circle').data(dots).enter().append('circle')
+        .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', 1).attr('fill', '#151F2E');
+      const zoom = d3.zoom().scaleExtent([0.3, 4]).on('zoom', ev => gMain.attr('transform', ev.transform));
+      svg.call(zoom);
     }
+    const gEdges = gMain.select('g.net-edges');
+    const gNodes = gMain.select('g.net-nodes');
+    gMain.select('text.net-empty').style('display', nodes.length ? 'none' : null);
 
     const sizeValue = (n) => {
       if (sizeMetric === 'merger') return n.merger_related_count || 0;
@@ -131,14 +133,14 @@ export default function NetworkVisualization({
       const cx = W / 2, cy = H / 2, R = 200;
       nodes.forEach((n, i) => {
         const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
-        n.fx = cx + Math.cos(ang) * R;
-        n.fy = cy + Math.sin(ang) * R;
+        n.x = cx + Math.cos(ang) * R; n.y = cy + Math.sin(ang) * R;
       });
     }
+    const nodeById = new Map(nodes.map(n => [n.id, n]));
 
     const edgeValue = (e) => edgeMetric === 'merger' ? (e.merger_related_count || 0) : (e.weight || 0);
-    let links = rawEdges
-      .filter(e => nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target))
+    const links = rawEdges
+      .filter(e => nodeById.has(e.source) && nodeById.has(e.target))
       .map(e => ({ ...e, source: e.source, target: e.target, channel: e.channel || 'unknown', val: edgeValue(e) }))
       .filter(e => edgeMetric !== 'merger' || e.val > 0);
     const maxW = d3.max(links, e => e.val) || 1;
@@ -186,30 +188,26 @@ export default function NetworkVisualization({
       edgeSel.classed('dimmed', false).classed('highlighted', false);
     }
 
-    // ── EDGES ──
-    const edgeSel = gEdges.selectAll('g.net-edge').data(links).enter()
-      .append('g').attr('class', 'net-edge');
+    // ── EDGES: keyed join（key = source>target>channel）──
+    const edgeKey = e => `${e.source}>${e.target}>${e.channel}`;
+    const edgeData = gEdges.selectAll('g.net-edge').data(links, edgeKey);
+    edgeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
+    const edgeEnter = edgeData.enter().append('g').attr('class', 'net-edge').style('opacity', 0);
+    edgeEnter.append('path').attr('class', 'edge-glow').style('fill', 'none').style('stroke-linecap', 'round');
+    edgeEnter.append('path').attr('class', 'edge-path').style('fill', 'none').style('stroke-linecap', 'round');
+    edgeEnter.append('path').attr('class', 'edge-arrow').style('stroke', 'none');
+    edgeEnter.append('path').attr('class', 'edge-hit').style('fill', 'none').style('stroke', 'transparent').style('stroke-width', 16).style('cursor', 'pointer');
+    const edgeLblEnter = edgeEnter.append('g').attr('class', 'net-edge-lbl');
+    edgeLblEnter.append('rect').attr('rx', 4).attr('height', 14).attr('fill', '#08111E').attr('fill-opacity', 0.92);
+    edgeLblEnter.append('text').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 700);
 
-    edgeSel.append('path').attr('class', 'edge-glow')
-      .style('fill', 'none').style('stroke-linecap', 'round')
-      .style('stroke', e => channelColor(e.channel))
-      .style('stroke-width', e => edgeWidth(e.val, maxW) + 6)
-      .style('stroke-opacity', 0.07);
-
-    edgeSel.append('path').attr('class', 'edge-path')
-      .style('fill', 'none').style('stroke-linecap', 'round')
-      .style('stroke', e => channelColor(e.channel))
-      .style('stroke-width', e => edgeWidth(e.val, maxW))
-      .style('stroke-opacity', 0.6);
-
-    // 方向を示す矢印（target node の手前に置く）
-    edgeSel.append('path').attr('class', 'edge-arrow')
-      .style('fill', e => channelColor(e.channel))
-      .style('stroke', 'none');
-
-    edgeSel.append('path').attr('class', 'edge-hit')
-      .style('fill', 'none').style('stroke', 'transparent')
-      .style('stroke-width', 16).style('cursor', 'pointer')
+    const edgeSel = edgeEnter.merge(edgeData);
+    edgeSel.select('.edge-glow').style('stroke', e => channelColor(e.channel))
+      .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
+    edgeSel.select('.edge-path').style('stroke', e => channelColor(e.channel))
+      .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
+    edgeSel.select('.edge-arrow').style('fill', e => channelColor(e.channel));
+    edgeSel.select('.edge-hit')
       .on('mouseenter', function (ev, e) {
         const fa = AGENTS[e.source]?.label || e.source;
         const ta = AGENTS[e.target]?.label || e.target;
@@ -220,22 +218,53 @@ export default function NetworkVisualization({
       })
       .on('mousemove', moveTT)
       .on('mouseleave', hideTT);
-
-    // weight ラベルは各 edge group の中に入れる（既定は CSS で非表示、hover/highlight 時のみ表示）
-    const edgeLbl = edgeSel.append('g').attr('class', 'net-edge-lbl');
-    edgeLbl.append('rect').attr('rx', 4).attr('height', 14)
-      .attr('fill', '#08111E').attr('fill-opacity', 0.92);
-    edgeLbl.append('text').attr('text-anchor', 'middle')
-      .attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 700);
+    // 新規 edge だけ fade in → 終了後 inline opacity を外して dimmed/highlighted の CSS に委ねる
+    edgeEnter.transition().duration(DUR).style('opacity', 1)
+      .on('end', function () { d3.select(this).style('opacity', null); });
 
     // ── NODES ──
-    const isSentiment = sizeMetric === 'sentiment';
+    const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
     const nodeFill = (d) => isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0');
     const nodeStroke = (d) => AGENTS[d.id]?.color || '#888';
     const abbrColor = (d) => isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333');
 
-    const nodeSel = gNodes.selectAll('g.net-node').data(nodes).enter()
-      .append('g').attr('class', 'net-node').style('cursor', 'pointer')
+    const rankById = {};
+    (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
+    const showRank = followingHeatmapSort && (heatmapOrder || []).length > 0;
+
+    // ── NODES: keyed join（key = id。位置固定なので transform は移動しない）──
+    const nodeData = gNodes.selectAll('g.net-node').data(nodes, d => d.id);
+    nodeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
+    const nodeEnter = nodeData.enter().append('g').attr('class', 'net-node').style('cursor', 'pointer').style('opacity', 0);
+    nodeEnter.append('circle').attr('class', 'n-ring').attr('fill', 'none').attr('stroke-width', 1.2).attr('stroke-opacity', 0.18).attr('stroke-dasharray', '4 3');
+    nodeEnter.append('circle').attr('class', 'n-glow').attr('fill-opacity', 0.09);
+    nodeEnter.append('circle').attr('class', 'n-circle').attr('stroke-width', 2.5);
+    nodeEnter.append('circle').attr('class', 'n-inner').attr('fill-opacity', 0.18);
+    nodeEnter.append('text').attr('class', 'n-abbr').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-weight', 700).attr('pointer-events', 'none');
+    nodeEnter.append('text').attr('class', 'n-label').attr('text-anchor', 'middle').attr('font-family', 'sans-serif').attr('font-size', 11).attr('font-weight', 600).attr('fill', '#cfe0f2').attr('pointer-events', 'none').attr('opacity', 0);
+    nodeEnter.append('rect').attr('class', 'n-badge-rect').attr('rx', 6.5).attr('height', 13).attr('pointer-events', 'none');
+    nodeEnter.append('text').attr('class', 'n-badge-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9).attr('fill', '#fff').attr('font-weight', 700).attr('pointer-events', 'none');
+    nodeEnter.append('circle').attr('class', 'n-rank-bg').attr('r', 9).attr('fill', '#0b1626').attr('stroke-width', 1.5).attr('pointer-events', 'none');
+    nodeEnter.append('text').attr('class', 'n-rank-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 800).attr('fill', '#dbe7f5').attr('pointer-events', 'none');
+
+    const nodeSel = nodeEnter.merge(nodeData);
+    nodeSel.select('.n-ring').attr('stroke', nodeStroke);
+    nodeSel.select('.n-glow').attr('fill', nodeStroke);
+    nodeSel.select('.n-circle').attr('stroke', nodeStroke).transition().duration(DUR).attr('fill', nodeFill);
+    nodeSel.select('.n-inner').attr('fill', nodeStroke);
+    nodeSel.select('.n-abbr').attr('fill', abbrColor).text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2));
+    nodeSel.select('.n-label').text(d => d.label);
+    nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
+    nodeSel.select('.n-badge-txt').text(d => d.message_count);
+    nodeSel.select('.n-rank-bg').attr('stroke', nodeStroke).style('display', showRank ? null : 'none');
+    nodeSel.select('.n-rank-txt').style('display', showRank ? null : 'none')
+      .text(d => (showRank && rankById[d.id] != null) ? `#${rankById[d.id]}` : '');
+    nodeSel.select('.n-ring').transition().duration(DUR).attr('r', d => d.r + 8);
+    nodeSel.select('.n-glow').transition().duration(DUR).attr('r', d => d.r + 3);
+    nodeSel.select('.n-circle').transition().duration(DUR).attr('r', d => d.r);
+    nodeSel.select('.n-inner').transition().duration(DUR).attr('r', d => Math.max(2, d.r - 4));
+    nodeSel.select('.n-abbr').transition().duration(DUR).attr('font-size', d => Math.max(9, Math.round(d.r * 0.56)));
+    nodeSel
       .on('click', (ev, n) => { ev.stopPropagation(); onSelectNode && onSelectNode(n.id); })
       .on('mouseenter', function (ev, n) {
         const a = AGENTS[n.id] || {};
@@ -252,59 +281,9 @@ export default function NetworkVisualization({
         if (!selectedNode) clearHighlight(); else highlightNode(selectedNode);
         if (d.id !== selectedNode) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
       });
-
-    nodeSel.append('circle').attr('class', 'n-ring')
-      .attr('r', d => d.r + 8).attr('fill', 'none')
-      .attr('stroke', nodeStroke).attr('stroke-width', 1.2)
-      .attr('stroke-opacity', 0.18).attr('stroke-dasharray', '4 3');
-
-    nodeSel.append('circle').attr('class', 'n-glow')
-      .attr('r', d => d.r + 3).attr('fill', nodeStroke).attr('fill-opacity', 0.09);
-
-    nodeSel.append('circle').attr('class', 'n-circle')
-      .attr('r', d => d.r).attr('fill', nodeFill)
-      .attr('stroke', nodeStroke).attr('stroke-width', 2.5);
-
-    nodeSel.append('circle').attr('class', 'n-inner')
-      .attr('r', d => Math.max(2, d.r - 4)).attr('fill', nodeStroke).attr('fill-opacity', 0.18);
-
-    nodeSel.append('text').attr('class', 'n-abbr')
-      .attr('text-anchor', 'middle')
-      .attr('font-family', 'monospace').attr('font-weight', 700)
-      .attr('font-size', d => Math.max(9, Math.round(d.r * 0.56)))
-      .attr('fill', abbrColor).attr('pointer-events', 'none')
-      .text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2));
-
-    nodeSel.append('text').attr('class', 'n-label')
-      .attr('text-anchor', 'middle')
-      .attr('font-family', 'sans-serif').attr('font-size', 11).attr('font-weight', 600)
-      .attr('fill', '#cfe0f2').attr('pointer-events', 'none').attr('opacity', 0)
-      .text(d => d.label);
-
-    nodeSel.append('rect').attr('class', 'n-badge-rect').attr('rx', 6.5).attr('height', 13)
-      .attr('fill', nodeStroke).attr('pointer-events', 'none');
-    nodeSel.append('text').attr('class', 'n-badge-txt')
-      .attr('text-anchor', 'middle').attr('font-family', 'monospace')
-      .attr('font-size', 9).attr('fill', '#fff').attr('font-weight', 700)
-      .attr('pointer-events', 'none').text(d => d.message_count);
-
-    // ── heatmap rank chip（"Apply heatmap sorting to network" ON 時のみ） ──
-    // heatmapOrder（heatmap の並び順 agent_id 列）から各 node の順位 #1.. を出す。
-    // agent name / total / sentiment いずれの sort でも network に並び順が反映される。
-    const rankById = {};
-    (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
-    const showRank = followingHeatmapSort && (heatmapOrder || []).length > 0;
-    if (showRank) {
-      nodeSel.append('circle').attr('class', 'n-rank-bg')
-        .attr('r', 9).attr('fill', '#0b1626')
-        .attr('stroke', nodeStroke).attr('stroke-width', 1.5)
-        .attr('pointer-events', 'none');
-      nodeSel.append('text').attr('class', 'n-rank-txt')
-        .attr('text-anchor', 'middle').attr('font-family', 'monospace')
-        .attr('font-size', 9.5).attr('font-weight', 800)
-        .attr('fill', '#dbe7f5').attr('pointer-events', 'none')
-        .text(d => rankById[d.id] != null ? `#${rankById[d.id]}` : '');
-    }
+    // 新規 node だけ fade in
+    nodeEnter.transition().duration(DUR).style('opacity', 1)
+      .on('end', function () { d3.select(this).style('opacity', null); });
 
     // ── 曲線 path + 矢印（有向）。target node の手前で止め、矢印をその先に置く ──
     function edgeGeom(a, b, off) {
@@ -329,8 +308,8 @@ export default function NetworkVisualization({
 
     function ticked() {
       edgeSel.each(function (e) {
-        const a = typeof e.source === 'object' ? e.source : nodes.find(n => n.id === e.source);
-        const b = typeof e.target === 'object' ? e.target : nodes.find(n => n.id === e.target);
+        const a = nodeById.get(e.source);
+        const b = nodeById.get(e.target);
         if (!a || !b) return;
         const gm = edgeGeom(a, b, e._off);
         const g = d3.select(this);
@@ -362,12 +341,7 @@ export default function NetworkVisualization({
       nodeSel.select('.n-rank-txt').attr('x', d => -d.r + 1).attr('y', d => -d.r + 1 + 3.3);
     }
 
-    // ── レイアウト: CrisisNet と同じ静的固定配置（force simulation なし） ──
-    // node を動かしても他の node は動かない（ドラッグした node だけ移動）。
-    nodes.forEach(n => {
-      if (layout === 'circle') { n.x = n.fx; n.y = n.fy; }
-      // それ以外は NP の手調整座標をそのまま使う（既に x/y セット済み）
-    });
+    // ── レイアウト: 静的固定配置（force simulation なし）。位置は NP / circle で確定済み ──
     ticked();
 
     nodeSel.call(d3.drag()
@@ -376,8 +350,8 @@ export default function NetworkVisualization({
 
     if (selectedNode) highlightNode(selectedNode);
 
-    return () => { if (simRef.current) { simRef.current.stop(); simRef.current = null; } };
-  }, [data, layout, sizeMetric, edgeMetric, onSelectNode, followingHeatmapSort, heatmapOrder, heatmapSortKey, heatmapSortDir]);
+    return () => {};
+  }, [data, layout, sizeMetric, edgeMetric, colorBySentiment, onSelectNode, followingHeatmapSort, heatmapOrder, heatmapSortKey, heatmapSortDir]);
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
