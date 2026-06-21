@@ -433,6 +433,7 @@ function App() {
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages', edgeWeight: 'weight' });
   const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
+  const [showAjay, setShowAjay] = useState(false); // データに無い推論ノード "Ajay"（mention ベース）を表示するか
   // network mode: 'independent' = 自前の filter + 自前の time range（animation なし）
   //               'timeline'    = 自前の filter、ただし time window は crisis timeline 追従（play で animate）
   //               'heatmap'     = filter / sort / time すべて heatmap を mirror
@@ -457,7 +458,13 @@ function App() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showLineChart, setShowLineChart] = useState(true);
   const [showNetwork, setShowNetwork] = useState(true);
+  // side-by-side（karşılaştırma）: heatmap と network を横並びにして同時に見る。
+  // この modda detaylı filtre panelleri ve line chart 非表示（üst sıra temiz karşılaştırma）。
+  const [sideBySide, setSideBySide] = useState(false);
   const [showStockPriceLine, setShowStockPriceLine] = useState(true);
+  // side-by-side modunda filtre panellerini ve line chart'ı gizle（layout için türetilmiş）。
+  const effFiltersOpen = filtersOpen && !sideBySide;
+  const effShowLineChart = showLineChart && !sideBySide;
   const [showBertSentimentLine, setShowBertSentimentLine] = useState(true);
 
   // ---- crisis timeline slider (CrisisNet風: round N まで累積表示) ----
@@ -550,11 +557,12 @@ function App() {
       if (netStartTime) p.set('start_time', inputValueToApiTime(netStartTime));
       if (netEndTime) p.set('end_time', inputValueToApiTime(netEndTime));
     }
+    if (showAjay) p.set('include_ajay', 'true');
     return p.toString();
   }, [granularity, netMirrorsHeatmap, netFollowsTimeline,
       mergerOnly, selectedMessageTypes, selectedTextSources, searchKeyword,
       netMergerOnly, netMessageTypes, netStartTime, netEndTime,
-      timelineStart, timelineEnd]);
+      timelineStart, timelineEnd, showAjay]);
 
   // ============================================
   // データ取得
@@ -790,6 +798,7 @@ function App() {
     setNetworkMode('independent');
     setNetworkSort({ nodeSize: 'messages', edgeWeight: 'weight' });
     setColorBySentiment(false);
+    setShowAjay(false);
     setNetMergerOnly(false);
     setNetMessageTypes([]);
     setNetAgentFilter([]);
@@ -886,8 +895,10 @@ function App() {
   const displayNetwork = useMemo(() => {
     if (netMirrorsHeatmap || !netAgentFilter.length) return network;
     const keep = new Set(netAgentFilter);
-    const nodes = (network.nodes || []).filter(n => keep.has(n.id));
-    const edges = (network.edges || []).filter(e => keep.has(e.source) && keep.has(e.target));
+    // inferred ノード（Ajay）は agent filter から除外しない
+    const nodes = (network.nodes || []).filter(n => keep.has(n.id) || n.inferred);
+    const keepIds = new Set(nodes.map(n => n.id));
+    const edges = (network.edges || []).filter(e => keepIds.has(e.source) && keepIds.has(e.target));
     return { ...network, nodes, edges };
   }, [network, netAgentFilter, netMirrorsHeatmap]);
 
@@ -913,8 +924,13 @@ function App() {
         <label className="check"><input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} /> Heatmap</label>
         <label className="check"><input type="checkbox" checked={showLineChart} onChange={e => setShowLineChart(e.target.checked)} /> Line Chart</label>
         <label className="check"><input type="checkbox" checked={showNetwork} onChange={e => setShowNetwork(e.target.checked)} /> Network</label>
-        <button type="button" className="fp-toggle gc-filters-toggle" onClick={() => setFiltersOpen(o => !o)}>
-          {filtersOpen ? 'Hide filters' : 'Show filters'}
+        <button type="button" className={`fp-toggle gc-compare-toggle ${sideBySide ? 'on' : ''}`}
+          onClick={() => setSideBySide(v => !v)}
+          title="Show the heatmap and network side by side for comparison (hides filter panels and the line chart while on).">
+          {sideBySide ? '◧ Side-by-side: on' : '◧ Side-by-side'}
+        </button>
+        <button type="button" className="fp-toggle gc-filters-toggle" disabled={sideBySide} onClick={() => setFiltersOpen(o => !o)}>
+          {effFiltersOpen ? 'Hide filters' : 'Show filters'}
         </button>
         <button type="button" className="fp-toggle gc-clear-filters" onClick={clearAllFilters}
           title="Reset every filter (heatmap + network + crisis timeline) to defaults. View modes like Daily/Hourly are kept.">
@@ -945,12 +961,16 @@ function App() {
       {status && <div className="status">{status}</div>}
 
       {/* ============================================
+          VISUALIZATION AREA（side-by-side のときは compare-row で横並び）
+          ============================================ */}
+      <div className={sideBySide ? 'compare-row' : ''}>
+      {/* ============================================
           HEATMAP SECTION : filter(左) | heatmap+detail+linechart(右)
           ============================================ */}
-      {(showHeatmap || showLineChart) && (
-        <section className={`section heatmap-section ${filtersOpen ? '' : 'filters-hidden'}`}>
+      {(showHeatmap || effShowLineChart) && (
+        <section className={`section heatmap-section ${effFiltersOpen ? '' : 'filters-hidden'}`}>
           {/* ---- left: heatmap filter panel (collapsed 時は描画しない=全幅) ---- */}
-          {filtersOpen && (
+          {effFiltersOpen && (
           <aside className="filter-panel">
             <div className="fp-title">
               <span>Heatmap filters</span>
@@ -1194,7 +1214,7 @@ function App() {
             )}
 
             {/* ---- Line Chart (under the detail panel, x-axis aligned with heatmap) ---- */}
-            {showLineChart && (
+            {effShowLineChart && (
               <>
                 <div className="lc-series-controls">
                   <span className="control-title">Line chart series:</span>
@@ -1214,8 +1234,8 @@ function App() {
           NETWORK SECTION : filter(左) | network(右)
           ============================================ */}
       {showNetwork && (
-        <section className={`section network-section ${filtersOpen ? '' : 'filters-hidden'}`}>
-          {filtersOpen && (
+        <section className={`section network-section ${effFiltersOpen ? '' : 'filters-hidden'}`}>
+          {effFiltersOpen && (
           <aside className="filter-panel">
             <div className="fp-title">
               <span>Network controls</span>
@@ -1330,18 +1350,24 @@ function App() {
               <div className="heatmap-title">
                 <div className="nv-head-left">
                   <h2>Communication network (reply graph)</h2>
-                  <span className="muted small">{displayNetwork.nodes?.length || 0} agents · {displayNetwork.edges?.length || 0} edges</span>
+                  <span className="muted small">{(displayNetwork.nodes || []).filter(n => !n.inferred).length} agents{(displayNetwork.nodes || []).some(n => n.inferred) ? ' + Ajay (inferred)' : ''} · {displayNetwork.edges?.length || 0} edges</span>
                 </div>
-                <div className="seg netmode-seg" role="group" aria-label="Network mode">
-                  {[
-                    ['independent', 'Independent', 'Network uses its own filters and its own time range (no timeline animation).'],
-                    ['timeline', 'Follow timeline', 'Network keeps its own filters, but the time window follows the crisis timeline — press Play to animate.'],
-                    ['heatmap', 'Mirror heatmap', "Network mirrors the heatmap's filters, sort order and time window."],
-                  ].map(([v, l, tip]) => (
-                    <button key={v} type="button" title={tip}
-                      className={`seg-btn ${networkMode === v ? 'on' : ''}`}
-                      onClick={() => setNetworkMode(v)}>{l}</button>
-                  ))}
+                <div className="nv-head-right">
+                  <label className="check ajay-toggle" title="Add 'Ajay' as an inferred node — Ajay is NOT in the data, only mentioned in messages. Edges = how often each agent mentions Ajay (in content + inner thoughts). Shown with a dashed/marked style.">
+                    <input type="checkbox" checked={showAjay} onChange={e => setShowAjay(e.target.checked)} />
+                    Ajay (inferred)
+                  </label>
+                  <div className="seg netmode-seg" role="group" aria-label="Network mode">
+                    {[
+                      ['independent', 'Independent', 'Network uses its own filters and its own time range (no timeline animation).'],
+                      ['timeline', 'Follow timeline', 'Network keeps its own filters, but the time window follows the crisis timeline — press Play to animate.'],
+                      ['heatmap', 'Mirror heatmap', "Network mirrors the heatmap's filters, sort order and time window."],
+                    ].map(([v, l, tip]) => (
+                      <button key={v} type="button" title={tip}
+                        className={`seg-btn ${networkMode === v ? 'on' : ''}`}
+                        onClick={() => setNetworkMode(v)}>{l}</button>
+                    ))}
+                  </div>
                 </div>
               </div>
               <NetworkVisualization
@@ -1372,6 +1398,7 @@ function App() {
           </div>
         </section>
       )}
+      </div>
 
       <ConversationFlowModal
         open={flowOpen}

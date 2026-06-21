@@ -1606,6 +1606,7 @@ def network(
     start_time: str = "",
     end_time: str = "",
     keyword: str = "",
+    include_ajay: bool = False,
 ):
     """
     agent間のcommunication network (reply graph) を返すAPI。
@@ -1664,9 +1665,53 @@ def network(
         keyword=normalized_keyword,
     )
 
+    # ── 推論ノード "Ajay" ──
+    # Ajay はデータ上の agent ではなく、message 本文/内部思考で言及されるだけの人物。
+    # include_ajay=true のとき、各 agent の message のうち 'ajay' に言及したものを数え、
+    # agent -> ajay の inferred edge として返す（recipient 記録は存在しないため mention ベース）。
+    ajay_query = f"""
+    MATCH (a:Agent)-[:SENT]->(m:Message)
+    WHERE true
+      {_common_where_clause()}
+      AND (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
+    WITH a.agent_id AS source,
+         count(m) AS weight,
+         sum(CASE WHEN coalesce(m.is_merger_related, false)
+                   OR coalesce(m.internal_merger_related, false) THEN 1 ELSE 0 END) AS merger_related_count
+    RETURN source, weight, merger_related_count
+    ORDER BY weight DESC
+    """
+
     with get_driver().session() as session:
         nodes = [dict(r) for r in session.run(node_query, **params)]
         edges = [dict(r) for r in session.run(edge_query, **params)]
+        ajay_rows = [dict(r) for r in session.run(ajay_query, **params)] if include_ajay else []
+
+    if include_ajay and ajay_rows:
+        total_mentions = sum(r["weight"] for r in ajay_rows)
+        total_merger = sum(r["merger_related_count"] for r in ajay_rows)
+        # inferred ノード（frontend で「データに無く後付け」と分かる印を付ける）
+        nodes.append({
+            "id": "ajay",
+            "label": "Ajay",
+            "message_count": total_mentions,
+            "merger_related_count": total_merger,
+            "bert_sentiment_score": None,
+            "inferred": True,
+        })
+        for r in ajay_rows:
+            edges.append({
+                "source": r["source"],
+                "target": "ajay",
+                "channel": "inferred",
+                "weight": r["weight"],
+                "message_count": r["weight"],
+                "merger_related_count": r["merger_related_count"],
+                "inferred": True,
+            })
 
     # cellのsentiment同様、node単位のsentimentもBERTで計算する
     # node別にfilter後のtextを集めてsentimentを計算

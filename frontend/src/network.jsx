@@ -32,8 +32,9 @@ const CHANNELS = {
   personal_post:   { label: 'personal_post', color: '#BA7517' },
   anonymous_post:  { label: 'anon_post',     color: '#E24B4A' },
 };
-const channelColor = (ch) => CHANNELS[ch]?.color || '#5A7A9A';
-const channelLabel = (ch) => CHANNELS[ch]?.label || (ch || 'other');
+const INFERRED_COLOR = '#c9a227'; // 推論ノード/エッジ（Ajay）用のアンバー
+const channelColor = (ch) => ch === 'inferred' ? INFERRED_COLOR : (CHANNELS[ch]?.color || '#5A7A9A');
+const channelLabel = (ch) => ch === 'inferred' ? 'Ajay mention' : (CHANNELS[ch]?.label || (ch || 'other'));
 
 // CrisisNet と同じ初期座標
 const NP = {
@@ -44,6 +45,7 @@ const NP = {
   pr_agent:           { x: 525, y: 432 },
   pr_intern_agent:    { x: 298, y: 458 },
   intern_agent:       { x: 135, y: 335 },
+  ajay:               { x: 360, y: 46 },   // データに無い推論ノード（上部中央＝外部の権威として）
 };
 
 const W = 720;
@@ -204,13 +206,22 @@ export default function NetworkVisualization({
     const edgeSel = edgeEnter.merge(edgeData);
     edgeSel.select('.edge-glow').style('stroke', e => channelColor(e.channel))
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
+    // inferred（Ajay 言及）エッジは破線で「実データの reply ではない」と分かるようにする
     edgeSel.select('.edge-path').style('stroke', e => channelColor(e.channel))
+      .style('stroke-dasharray', e => e.inferred ? '6 4' : null)
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
     edgeSel.select('.edge-arrow').style('fill', e => channelColor(e.channel));
     edgeSel.select('.edge-hit')
       .on('mouseenter', function (ev, e) {
         const fa = AGENTS[e.source]?.label || e.source;
         const ta = AGENTS[e.target]?.label || e.target;
+        if (e.inferred) {
+          showTT(ev, `<div class="tt-name" style="color:${INFERRED_COLOR}">${fa} &rarr; Ajay</div>
+            <div class="tt-row"><span class="tt-k">Inferred</span><span class="tt-v">mention-based</span></div>
+            <div class="tt-row"><span class="tt-k">Ajay mentions</span><span class="tt-v">${e.weight}</span></div>
+            <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${e.merger_related_count}</span></div>`);
+          return;
+        }
         showTT(ev, `<div class="tt-name" style="color:${channelColor(e.channel)}">${fa} &rarr; ${ta}</div>
           <div class="tt-row"><span class="tt-k">Channel</span><span class="tt-v">${channelLabel(e.channel)}</span></div>
           <div class="tt-row"><span class="tt-k">Replies</span><span class="tt-v">${e.weight}</span></div>
@@ -224,9 +235,9 @@ export default function NetworkVisualization({
 
     // ── NODES ──
     const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
-    const nodeFill = (d) => isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0');
-    const nodeStroke = (d) => AGENTS[d.id]?.color || '#888';
-    const abbrColor = (d) => isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333');
+    const nodeFill = (d) => d.inferred ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0'));
+    const nodeStroke = (d) => d.inferred ? INFERRED_COLOR : (AGENTS[d.id]?.color || '#888');
+    const abbrColor = (d) => d.inferred ? INFERRED_COLOR : (isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333'));
 
     const rankById = {};
     (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
@@ -249,11 +260,16 @@ export default function NetworkVisualization({
 
     const nodeSel = nodeEnter.merge(nodeData);
     nodeSel.select('.n-ring').attr('stroke', nodeStroke);
-    nodeSel.select('.n-glow').attr('fill', nodeStroke);
-    nodeSel.select('.n-circle').attr('stroke', nodeStroke).transition().duration(DUR).attr('fill', nodeFill);
-    nodeSel.select('.n-inner').attr('fill', nodeStroke);
-    nodeSel.select('.n-abbr').attr('fill', abbrColor).text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2));
-    nodeSel.select('.n-label').text(d => d.label);
+    nodeSel.select('.n-glow').attr('fill', nodeStroke).style('display', d => d.inferred ? 'none' : null);
+    // inferred ノード（Ajay）は塗りを破線リングで描いて「データに無く後付け」と分かるようにする
+    nodeSel.select('.n-circle').attr('stroke', nodeStroke)
+      .attr('stroke-dasharray', d => d.inferred ? '5 3' : null)
+      .transition().duration(DUR).attr('fill', nodeFill);
+    nodeSel.select('.n-inner').attr('fill', nodeStroke).style('display', d => d.inferred ? 'none' : null);
+    nodeSel.select('.n-abbr').attr('fill', abbrColor).text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2).toUpperCase());
+    nodeSel.select('.n-label').text(d => d.inferred ? `${d.label} (inferred — not in data)` : d.label);
+    // inferred ラベルは常時表示
+    nodeSel.select('.n-label').filter(d => d.inferred).attr('opacity', 1);
     nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
     nodeSel.select('.n-badge-txt').text(d => d.message_count);
     nodeSel.select('.n-rank-bg').attr('stroke', nodeStroke).style('display', showRank ? null : 'none');
@@ -279,7 +295,7 @@ export default function NetworkVisualization({
       .on('mouseleave', function (ev, d) {
         hideTT();
         if (!selectedNode) clearHighlight(); else highlightNode(selectedNode);
-        if (d.id !== selectedNode) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
+        if (d.id !== selectedNode && !d.inferred) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
       });
     // 新規 node だけ fade in
     nodeEnter.transition().duration(DUR).style('opacity', 1)
@@ -358,7 +374,7 @@ export default function NetworkVisualization({
     svg.selectAll('g.net-node')
       .classed('selected', d => d.id === selectedNode)
       .each(function (d) {
-        d3.select(this).select('.n-label').attr('opacity', d.id === selectedNode ? 1 : 0);
+        d3.select(this).select('.n-label').attr('opacity', (d.inferred || d.id === selectedNode) ? 1 : 0);
       });
   }, [selectedNode, data]);
 
@@ -369,6 +385,7 @@ export default function NetworkVisualization({
     channelTotals[ch] = (channelTotals[ch] || 0) + (e.weight || 0);
   });
   const legendChannels = Object.keys(CHANNELS).filter(ch => channelTotals[ch] > 0);
+  const hasInferred = (data?.edges || []).some(e => e.inferred) || (data?.nodes || []).some(n => n.inferred);
 
   return (
     <div className="net-wrap">
@@ -382,6 +399,11 @@ export default function NetworkVisualization({
             <span className="nl-cnt">{channelTotals[ch]}</span>
           </span>
         )) : <span className="nl-item">Edge color = channel · node size = messages · hover for name</span>}
+        {hasInferred && (
+          <span className="nl-item" title="Ajay is not an agent in the data — only mentioned in messages. Dashed = inferred from mentions.">
+            <span className="nl-line nl-dash" style={{ color: INFERRED_COLOR }} /> Ajay (inferred — not in data)
+          </span>
+        )}
       </div>
     </div>
   );
