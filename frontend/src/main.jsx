@@ -165,8 +165,10 @@ function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, play
 // count: メッセージ数（keywordありのときはkeyword一致数）の青系グラデーション
 function countColor(count, max) {
   if (!count || !max) return { bg: '#10202f', opacity: 1 };
-  // perceptually lifted sequential blue: floor raised so低 values still pop on dark bg
-  const t = 0.18 + 0.82 * Math.sqrt(count / max);
+  // log1p scaling: compresses high counts so差 between low counts (1,2,3…) becomes
+  // much more visible. floor raised so低 values still pop on dark bg.
+  const norm = Math.log1p(count) / Math.log1p(max);
+  const t = 0.18 + 0.82 * norm;
   // interpolate #16314d (low) -> #3aa0ff (high)
   const lerp = (a, b) => Math.round(a + (b - a) * t);
   const r = lerp(0x16, 0x3a), g = lerp(0x31, 0xa0), b = lerp(0x4d, 0xff);
@@ -727,6 +729,23 @@ function App() {
   const toggleMessageType = (t) => toggleInSet(setSelectedMessageTypes, options.message_types || [], t);
   const toggleTextSource = (s) => toggleInSet(setSelectedTextSources, options.text_sources || Object.keys(TEXT_SOURCE_LABELS), s);
 
+  // inner thought の3ソースをまとめて on/off するためのヘルパ。
+  // 個別チェックボックスは従来どおり残しつつ、1つのチェックで3つ同時に切り替えられる。
+  const INNER_THOUGHT_SOURCES = ['reacting', 'rationalizing', 'deliberating'];
+  const isInnerAllActive = INNER_THOUGHT_SOURCES.every(s => isInSet(selectedTextSources, s));
+  const toggleInnerThoughts = () => {
+    const allSources = options.text_sources || Object.keys(TEXT_SOURCE_LABELS);
+    setSelectedTextSources(prev => {
+      const base = prev.length === 0 ? allSources.slice() : prev.slice();
+      const allOn = INNER_THOUGHT_SOURCES.every(s => base.includes(s));
+      let next = allOn
+        ? base.filter(s => !INNER_THOUGHT_SOURCES.includes(s))           // 3つ全 off
+        : Array.from(new Set([...base, ...INNER_THOUGHT_SOURCES]));      // 3つ全 on
+      if (allSources.length && allSources.every(s => next.includes(s))) next = []; // 全選択 → All
+      return next;
+    });
+  };
+
   // message types を visibility（internal / external）でグループ化する。
   // 空配列 = 全 type 選択（= All）なので、グループ補助 UI もそれを踏まえて表示する。
   const messageTypesByGroup = useMemo(() => {
@@ -999,21 +1018,6 @@ function App() {
                   
                 </Collapsible>
 
-                <Collapsible title="Sorting" defaultOpen={false}>
-                  <div className="row">
-                    <select value={heatmapSort.key} onChange={e => setHeatmapSort(s => ({ ...s, key: e.target.value }))}>
-                      <option value="agent_id">Agent name</option>
-                      <option value="total">Total messages</option>
-                      <option value="sentiment">Mean sentiment</option>
-                    </select>
-                    <select value={heatmapSort.dir} onChange={e => setHeatmapSort(s => ({ ...s, dir: e.target.value }))}>
-                      <option value="asc">Asc</option>
-                      <option value="desc">Desc</option>
-                    </select>
-                  </div>
-                  <div className="muted small">Sorting only changes row order, not the analysis values.</div>
-                </Collapsible>
-
                 <Collapsible title="Message types" defaultOpen={false}>
                   <label className="check select-all-row"><input type="checkbox" checked={selectedMessageTypes.length === 0} onChange={() => setSelectedMessageTypes([])} /> All</label>
 
@@ -1056,19 +1060,29 @@ function App() {
 
                 <Collapsible title="Text sources" defaultOpen={false}>
                   <label className="check select-all-row"><input type="checkbox" checked={selectedTextSources.length === 0} onChange={() => setSelectedTextSources([])} /> All</label>
+                  {/* content は単独。inner thought 3つは「Inner thought」グループでまとめて切替可能 */}
                   <div className="type-grid">
-                    {(options.text_sources || Object.keys(TEXT_SOURCE_LABELS)).map(s => (
-                      <label className="check" key={s}><input type="checkbox" checked={isInSet(selectedTextSources, s)} onChange={() => toggleTextSource(s)} /> {TEXT_SOURCE_LABELS[s] || s}</label>
-                    ))}
+                    <label className="check"><input type="checkbox" checked={isInSet(selectedTextSources, 'content')} onChange={() => toggleTextSource('content')} /> {TEXT_SOURCE_LABELS['content']}</label>
+                  </div>
+                  <div className="type-group">
+                    <label className="check group-head">
+                      <input type="checkbox" checked={isInnerAllActive} onChange={toggleInnerThoughts} />
+                      Inner thought <span className="muted small">(all 3)</span>
+                    </label>
+                    <div className="type-grid indent">
+                      {INNER_THOUGHT_SOURCES.map(s => (
+                        <label className="check" key={s}><input type="checkbox" checked={isInSet(selectedTextSources, s)} onChange={() => toggleTextSource(s)} /> {TEXT_SOURCE_LABELS[s] || s}</label>
+                      ))}
+                    </div>
                   </div>
                 </Collapsible>
 
-                <Collapsible title="Merger" defaultOpen={false}>
+                <div className="control-block">
                   <label className="check merger-check">
                     <input type="checkbox" checked={mergerOnly} onChange={e => setMergerOnly(e.target.checked)} />
                     Merger-related only in selected text sources
                   </label>
-                </Collapsible>
+                </div>
 
                 <Collapsible title="Agents" defaultOpen={false}>
                   <label className="check select-all-row"><input type="checkbox" checked={agentFilter.length === 0} onChange={() => setAgentFilter([])} /> All</label>
@@ -1082,7 +1096,7 @@ function App() {
                   </div>
                 </Collapsible>
 
-                <Collapsible title="Close / far meaning keywords" defaultOpen={true}>
+                <Collapsible title="Close meaning keywords" defaultOpen={true}>
                   {!selected && <div className="muted small">Click a heatmap cell to extract keywords from its messages.</div>}
                   {keywords.close_keywords?.length > 0 && (
                     <>
@@ -1090,18 +1104,6 @@ function App() {
                       <div className="chips clickable">
                         {keywords.close_keywords.map(k => (
                           <button key={`c-${k.keyword}`} className="kw-chip" onClick={() => onKeywordClick(k.keyword)} title="Search this keyword">
-                            {k.keyword} <span className="kw-score">{Number(k.similarity).toFixed(2)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  {keywords.far_keywords?.length > 0 && (
-                    <>
-                      <div className="kw-group-label">Far from meaning</div>
-                      <div className="chips clickable">
-                        {keywords.far_keywords.map(k => (
-                          <button key={`f-${k.keyword}`} className="kw-chip far" onClick={() => onKeywordClick(k.keyword)} title="Search this keyword">
                             {k.keyword} <span className="kw-score">{Number(k.similarity).toFixed(2)}</span>
                           </button>
                         ))}
@@ -1271,14 +1273,14 @@ function App() {
                   </div>
                 </Collapsible>
 
-                <Collapsible title="Merger" defaultOpen={false}>
+                <div className="control-block">
                   {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — taken from the heatmap.</div>}
                   <label className={`check merger-check ${netMirrorsHeatmap ? 'disabled' : ''}`}>
                     <input type="checkbox" checked={netMergerOnly} disabled={netMirrorsHeatmap}
                       onChange={e => setNetMergerOnly(e.target.checked)} />
                     Merger-related keyword only
                   </label>
-                </Collapsible>
+                </div>
 
                 <Collapsible title="Time range / sorting" defaultOpen={false}>
                   {netFollowsTimeline
@@ -1297,32 +1299,6 @@ function App() {
                     : netFollowsTimeline
                       ? <div className="muted small">“Follow timeline” keeps your own network filters while the time window tracks the crisis timeline.</div>
                       : <div className="muted small">Tip: use the mode selector above the graph to follow the timeline or mirror the heatmap.</div>}
-                </Collapsible>
-
-                <Collapsible title="Node metric" defaultOpen={true}>
-                  <div className={netMirrorsHeatmap ? 'disabled' : ''}>
-                    <div className="control-title">Node size metric</div>
-                    <div className="seg">
-                      {[['messages', 'Messages'], ['merger', 'Merger']].map(([v, l]) => (
-                        <button key={v} disabled={netMirrorsHeatmap}
-                          className={`seg-btn ${networkSort.nodeSize === v ? 'on' : ''}`}
-                          onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
-                      ))}
-                    </div>
-                    <label className="check" style={{ marginTop: 8 }}>
-                      <input type="checkbox" checked={colorBySentiment} disabled={netMirrorsHeatmap}
-                        onChange={e => setColorBySentiment(e.target.checked)} />
-                      Color nodes by sentiment
-                    </label>
-                  </div>
-                </Collapsible>
-
-                <Collapsible title="Layout" defaultOpen={true}>
-                  <div className="seg">
-                    {[['force', 'Fixed'], ['circle', 'Circle']].map(([v, l]) => (
-                      <button key={v} className={`seg-btn ${networkLayout === v ? 'on' : ''}`} onClick={() => setNetworkLayout(v)}>{l}</button>
-                    ))}
-                  </div>
                 </Collapsible>
 
                 <Collapsible title="Selected node" defaultOpen={true}>
