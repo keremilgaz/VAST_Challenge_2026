@@ -163,16 +163,37 @@ function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, play
 // 各heatmap modeのcell色
 // ============================================
 // count: メッセージ数（keywordありのときはkeyword一致数）の青系グラデーション
+// 白→青の連続カラーマップ（sequential single-hue）。
+// 直感的（薄い=少ない / 濃い青=多い）で、暗い背景でも低カウントが白く浮くため見分けやすい。
+// 濃端は背景ネイビーに沈まない鮮やかな青で止める。空セル(0)は別の暗色にして「data無し」と区別。
+const BLUES = [
+  [240, 246, 255], // #f0f6ff  ほぼ白（わずかに青み）
+  [200, 223, 248], // #c8dff8
+  [147, 190, 236], // #93beec
+  [85, 143, 216],  // #558fd8
+  [26, 92, 192],   // #1a5cc0  鮮やかな青
+];
+function bluesRGB(t) {
+  const x = Math.max(0, Math.min(1, t)) * (BLUES.length - 1);
+  const i = Math.floor(x), f = x - i;
+  const a = BLUES[i], b = BLUES[Math.min(i + 1, BLUES.length - 1)];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
 function countColor(count, max) {
-  if (!count || !max) return { bg: '#10202f', opacity: 1 };
-  // log1p scaling: compresses high counts so差 between low counts (1,2,3…) becomes
-  // much more visible. floor raised so低 values still pop on dark bg.
+  if (!count || !max) return { bg: '#10202f', opacity: 1, fg: '#8fb2d8' };
+  // log1p で少数の差を強調し、その値を白→青ランプに通す。
+  // 白端は暗い背景から十分に浮くので floor は不要。
   const norm = Math.log1p(count) / Math.log1p(max);
-  const t = 0.18 + 0.82 * norm;
-  // interpolate #16314d (low) -> #3aa0ff (high)
-  const lerp = (a, b) => Math.round(a + (b - a) * t);
-  const r = lerp(0x16, 0x3a), g = lerp(0x31, 0xa0), b = lerp(0x4d, 0xff);
-  return { bg: `rgb(${r},${g},${b})`, opacity: 1 };
+  const [r, g, b] = bluesRGB(norm);
+  // 薄い（白寄り）セルは白文字が見えないので、輝度で文字色を切替。
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  const fg = lum > 150 ? '#10202f' : '#fff';
+  return { bg: `rgb(${r},${g},${b})`, opacity: 1, fg };
 }
 
 // sentiment: -1=赤 / 0=灰 / 1=緑
@@ -436,13 +457,24 @@ function App() {
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages', edgeWeight: 'weight' });
   const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
   const [showAjay, setShowAjay] = useState(false); // データに無い推論ノード "Ajay"（mention ベース）を表示するか
-  // network mode: 'independent' = 自前の filter + 自前の time range（animation なし）
-  //               'timeline'    = 自前の filter、ただし time window は crisis timeline 追従（play で animate）
-  //               'heatmap'     = filter / sort / time すべて heatmap を mirror
-  const [networkMode, setNetworkMode] = useState('independent');
-  const netMirrorsHeatmap = networkMode === 'heatmap';   // heatmap の filter/sort を採用するか
-  const netFollowsTimeline = networkMode !== 'independent'; // time window を timeline から取るか
+  // network の挙動を決める2つの独立したtoggle（以前は1つの3値 networkMode に
+  // 詰め込んでいたが、"filterの出所"と"time windowの出所"は別々の軸なので分離した）。
+  //   netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか
+  //   netFollowsTimeline: time window を crisis timeline から取るか、network自前の手動範囲にするか
+  // 2つは互いに独立 — 4つの組み合わせすべてが有効（例: heatmapのfilterを使いつつ、
+  // timeとは別に自分でtime rangeを指定する、なども可能）。
+  const [netMirrorsHeatmap, setNetMirrorsHeatmap] = useState(false);
+  const [netFollowsTimeline, setNetFollowsTimeline] = useState(false);
   const [selectedNetworkNode, setSelectedNetworkNode] = useState(null);
+  // ---- network edge click → Edge Messages Panel ----
+  const [selectedEdge, setSelectedEdge] = useState(null); // { key, source, target, sourceLabel, targetLabel, channel, inferred }
+  const [edgeMessages, setEdgeMessages] = useState([]);
+  const [isEdgeDetailCollapsed, setIsEdgeDetailCollapsed] = useState(false);
+
+  // ---- Ajay's hints timeline (modal) ----
+  const [ajayTimelineOpen, setAjayTimelineOpen] = useState(false);
+  const [ajayTimelineMessages, setAjayTimelineMessages] = useState([]);
+  const [ajayTimelineStatus, setAjayTimelineStatus] = useState(''); // '', 'loading', 'error'
 
   // network専用 filter（heatmapの計算には一切影響させない。networkだけに適用する）
   const [netMessageTypes, setNetMessageTypes] = useState([]);
@@ -814,7 +846,8 @@ function App() {
     setAgentFilter([]);
     setHeatmapSort({ key: 'agent_id', dir: 'asc' });
     // network filters
-    setNetworkMode('independent');
+    setNetMirrorsHeatmap(false);
+    setNetFollowsTimeline(false);
     setNetworkSort({ nodeSize: 'messages', edgeWeight: 'weight' });
     setColorBySentiment(false);
     setShowAjay(false);
@@ -863,6 +896,65 @@ function App() {
       setStatus('Could not load message details (is the backend running?).');
     }
   }
+
+  // ============================================
+  // network edge click → edge messages (同じ chat panel を再利用)
+  // ============================================
+  // useCallback必須: これがNetworkVisualizationのpropとしてD3描画effectの
+  // dependency arrayに入っているため、毎render新しい関数参照になると
+  // effect全体が再実行され、drag等で動かしたnode位置がリセットされてしまう
+  // （layoutが"resetする"バグの原因だった）。networkQueryが変わらない限り
+  // 同じ関数参照を保つことでeffectの不要な再実行を防ぐ。
+  const selectEdge = useCallback(async (edge) => {
+    const sourceLabel = AGENTS[edge.source]?.label || edge.source;
+    const targetLabel = edge.inferred ? 'Ajay' : (AGENTS[edge.target]?.label || edge.target);
+    const key = `${edge.source}>${edge.target}>${edge.channel}`;
+    setSelectedEdge({
+      key,
+      source: edge.source,
+      target: edge.target,
+      channel: edge.channel,
+      inferred: !!edge.inferred,
+      sourceLabel,
+      targetLabel,
+    });
+    setIsEdgeDetailCollapsed(false);
+    // 別edgeを選んだら単一message選択はリセット（heatmapのcell選択と同じ挙動）
+    setSelectedMessageId(null);
+    setMessageContext(null);
+    setContextStatus('');
+
+    const p = new URLSearchParams(networkQuery);
+    p.set('source', edge.source);
+    p.set('target', edge.target);
+    if (!edge.inferred) p.set('channel', edge.channel || '');
+
+    try {
+      const res = await fetch(`${API}/api/edge-messages?${p.toString()}`);
+      setEdgeMessages(res.ok ? await res.json() : []);
+    } catch (e) {
+      setEdgeMessages([]);
+      setStatus('Could not load edge messages (is the backend running?).');
+    }
+  }, [networkQuery]);
+
+  // ============================================
+  // "Ajay's hints timeline" — Ajayを言及するmessageを時系列で開く
+  // 現在のnetwork filter（networkQuery）をそのまま使う。
+  // ============================================
+  const openAjayTimeline = useCallback(async () => {
+    setAjayTimelineOpen(true);
+    setAjayTimelineStatus('loading');
+    try {
+      const res = await fetch(`${API}/api/ajay-timeline?${networkQuery}`);
+      if (!res.ok) throw new Error(`ajay-timeline ${res.status}`);
+      setAjayTimelineMessages(await res.json());
+      setAjayTimelineStatus('');
+    } catch (e) {
+      setAjayTimelineMessages([]);
+      setAjayTimelineStatus('error');
+    }
+  }, [networkQuery]);
 
   // 単一messageをクリック → 関連message(context)を取得
   async function selectMessage(messageId) {
@@ -1134,7 +1226,7 @@ function App() {
 
               {/* legend */}
               <div className="legend">
-                {heatmapMode === 'count' && <span className="muted small">Deeper / brighter blue = more messages</span>}
+                {heatmapMode === 'count' && <span className="muted small">Fewer <span className="lg-swatch" style={{ background: '#e3eefb' }} /><span className="lg-swatch" style={{ background: '#93beec' }} /><span className="lg-swatch" style={{ background: '#558fd8' }} /><span className="lg-swatch" style={{ background: '#1a5cc0' }} /> more messages · log scale · <span className="lg-swatch" style={{ background: '#10202f' }} /> empty</span>}
                 {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> neutral <span className="lg-swatch" style={{ background: '#4ade80' }} /> positive · empty = no messages</span>}
                 {heatmapMode === 'semantic_change' && <span className="muted small">Semantic distance: <span className="lg-swatch" style={{ background: '#2a335e' }} /> similar → <span className="lg-swatch" style={{ background: '#9d4ddd' }} /> different · empty = no comparable messages</span>}
               </div>
@@ -1163,7 +1255,7 @@ function App() {
                         const isSel = selected && selected.agent.agent_id === agent.agent_id && selected.bucket === b;
                         if (heatmapMode === 'count') {
                           const cc = countColor(count, heatmap.max_count);
-                          style = { background: cc.bg, opacity: cc.opacity };
+                          style = { background: cc.bg, opacity: cc.opacity, color: cc.fg };
                           title = `${agent.agent_label} ${b}: ${count}${searchKeyword.trim() ? ` matches` : ' messages'}`;
                         } else if (heatmapMode === 'sentiment') {
                           const s = c?.bert_sentiment_score;
@@ -1284,7 +1376,7 @@ function App() {
 
                 <Collapsible title="Time range / sorting" defaultOpen={false}>
                   {netFollowsTimeline
-                    ? <div className="muted small">Time window follows the crisis timeline ({networkMode === 'heatmap' ? 'heatmap mirror' : 'Follow timeline'} mode) — press Play above to animate. Switch to “Independent” above the graph to set a network-only range here.</div>
+                    ? <div className="muted small">Time window follows the crisis timeline — press Play above to animate. Uncheck “Follow timeline” above the graph to set a network-only range here.</div>
                     : <div className="muted small">Network-only time range. Independent of the heatmap and crisis timeline. Leave empty for the full range.</div>}
                   <div className={`time-inputs ${netFollowsTimeline ? 'disabled' : ''}`}>
                     <label>Start<input type="datetime-local" value={netStartTime} onChange={e => setNetStartTime(e.target.value)} /></label>
@@ -1295,7 +1387,7 @@ function App() {
                     <button onClick={clearNetTimeRange}>Clear</button>
                   </div>
                   {netMirrorsHeatmap
-                    ? <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}) and follows the crisis timeline. Node numbers #1…#N follow the heatmap row order.</div>
+                    ? <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}). Node numbers #1…#N follow the heatmap row order.</div>
                     : netFollowsTimeline
                       ? <div className="muted small">“Follow timeline” keeps your own network filters while the time window tracks the crisis timeline.</div>
                       : <div className="muted small">Tip: use the mode selector above the graph to follow the timeline or mirror the heatmap.</div>}
@@ -1333,16 +1425,19 @@ function App() {
                     <input type="checkbox" checked={showAjay} onChange={e => setShowAjay(e.target.checked)} />
                     Ajay (inferred)
                   </label>
-                  <div className="seg netmode-seg" role="group" aria-label="Network mode">
-                    {[
-                      ['independent', 'Independent', 'Network uses its own filters and its own time range (no timeline animation).'],
-                      ['timeline', 'Follow timeline', 'Network keeps its own filters, but the time window follows the crisis timeline — press Play to animate.'],
-                      ['heatmap', 'Mirror heatmap', "Network mirrors the heatmap's filters, sort order and time window."],
-                    ].map(([v, l, tip]) => (
-                      <button key={v} type="button" title={tip}
-                        className={`seg-btn ${networkMode === v ? 'on' : ''}`}
-                        onClick={() => setNetworkMode(v)}>{l}</button>
-                    ))}
+                  <button type="button" className="ajay-hints-btn" onClick={openAjayTimeline}
+                    title="Ajay is never the sender of a message — he's only quoted or referenced inside other agents' messages/inner thoughts. This opens those mentions in chronological order so you can read what he actually hinted at, instead of just a mention count.">
+                    Ajay's hints timeline
+                  </button>
+                  <div className="netmode-toggles" role="group" aria-label="Network mode">
+                    <label className="check netmode-toggle" title="Filters, sort order and node size come from the heatmap's own settings instead of network's own filters.">
+                      <input type="checkbox" checked={netMirrorsHeatmap} onChange={e => setNetMirrorsHeatmap(e.target.checked)} />
+                      Mirror heatmap filters
+                    </label>
+                    <label className="check netmode-toggle" title="Time window follows the crisis timeline (press Play above to animate) instead of a manual network-only range.">
+                      <input type="checkbox" checked={netFollowsTimeline} onChange={e => setNetFollowsTimeline(e.target.checked)} />
+                      Follow timeline
+                    </label>
                   </div>
                 </div>
               </div>
@@ -1354,6 +1449,8 @@ function App() {
                 colorBySentiment={netMirrorsHeatmap ? heatmapSort.key === 'sentiment' : colorBySentiment}
                 selectedNode={selectedNetworkNode}
                 onSelectNode={setSelectedNetworkNode}
+                selectedEdge={selectedEdge?.key}
+                onSelectEdge={selectEdge}
                 followingHeatmapSort={netMirrorsHeatmap}
                 heatmapOrder={heatmapOrder}
                 heatmapSortKey={heatmapSort.key}
@@ -1363,18 +1460,44 @@ function App() {
                 <div className="muted small net-follow-note">
                   Mirroring heatmap: filters mirrored · node size = {effectiveNetworkSize} ·
                   {' '}numbered #1…#{heatmapOrder.length} by {{ agent_id: 'agent name', total: 'total messages', sentiment: 'mean sentiment' }[heatmapSort.key]} ({heatmapSort.dir})
+                  {netFollowsTimeline ? ' · time window follows the crisis timeline' : " · time window is network's own manual range"}
                 </div>
               )}
-              {networkMode === 'timeline' && (
+              {!netMirrorsHeatmap && netFollowsTimeline && (
                 <div className="muted small net-follow-note">
                   Following timeline: your network filters apply · time window = current crisis-timeline round range · press Play above to animate.
                 </div>
               )}
+
+              {/* ---- Edge Messages Panel (collapsible, directly under the network graph) ---- */}
+              <EdgeMessagesPanel
+                selectedEdge={selectedEdge}
+                messages={edgeMessages}
+                collapsed={isEdgeDetailCollapsed}
+                setCollapsed={setIsEdgeDetailCollapsed}
+                selectedMessageId={selectedMessageId}
+                messageContext={messageContext}
+                contextStatus={contextStatus}
+                onSelectMessage={selectMessage}
+                onOpenFlow={() => setFlowOpen(true)}
+              />
             </div>
           </div>
         </section>
       )}
       </div>
+
+      {/* AjayTimelineModal を先に描画: メッセージをクリックすると selectMessage が
+          ConversationFlowModal を開くので、後から描画する ConversationFlowModal が
+          常にその上に重なるようにする（同じ overlay の二重表示で隠れないように）。 */}
+      <AjayTimelineModal
+        open={ajayTimelineOpen}
+        messages={ajayTimelineMessages}
+        status={ajayTimelineStatus}
+        onClose={() => setAjayTimelineOpen(false)}
+        selectedMessageId={selectedMessageId}
+        onSelectMessage={selectMessage}
+      />
 
       <ConversationFlowModal
         open={flowOpen}
@@ -1431,41 +1554,97 @@ function MessageDetailPanel({ selected, selectedCellData, selectedSemantic, sema
           )}
 
           <h3>Messages ({messages.length})</h3>
-          {messages.length === 0 && <p className="muted">No messages matched the current filters.</p>}
-          {messages.map(m => (
-            <article
-              className={`message clickable${m.message_id === selectedMessageId ? ' selected' : ''}`}
-              key={m.message_id}
-              onClick={() => onSelectMessage && onSelectMessage(m.message_id)}
-              title="Click to see this message's context / related messages"
-            >
-              <div className="msg-meta">
-                {m.comm_id != null && <span className="comm-id">#{m.comm_id}</span>}
-                <b>{m.timestamp}</b>
-                <span>{m.agent_label}</span>
-                <span>{m.channel}</span>
-                <span>{m.message_type}</span>
-                <span>{m.visibility}</span>
-                {m.keyword_score > 0 && <span className="keyword-score">keyword score: {m.keyword_score}</span>}
-                {m.is_merger_related && <span className="merger">content merger-related</span>}
-                {m.internal_merger_related && <span className="internal-merger">internal merger-related</span>}
-              </div>
-              <div className="sub-meta">
-                Role: {m.agent_role || '-'} / Recipients: {formatRecipients(m.recipients)} / Responding to: {m.responding_to || '-'}
-              </div>
-              <p>{m.content}</p>
-              {(m.internal_reacting || m.internal_rationalizing || m.internal_deliberating) && (
-                <details onClick={e => e.stopPropagation()}>
-                  <summary>internal state</summary>
-                  {m.internal_reacting && <p><b>reacting:</b> {m.internal_reacting}</p>}
-                  {m.internal_rationalizing && <p><b>rationalizing:</b> {m.internal_rationalizing}</p>}
-                  {m.internal_deliberating && <p><b>deliberating:</b> {m.internal_deliberating}</p>}
-                </details>
-              )}
-            </article>
-          ))}
+          <MessageList messages={messages} selectedMessageId={selectedMessageId} onSelectMessage={onSelectMessage} />
 
           {/* clicking any message opens the related-messages chat popup */}
+          {selectedMessageId && (
+            <div className="ctx-hint">
+              <span className="muted">
+                {contextStatus === 'loading' ? 'Loading related messages…'
+                  : contextStatus === 'error' ? 'Could not load related messages.'
+                  : 'Related messages open in a chat popup.'}
+              </span>
+              <button className="flow-btn" onClick={(e) => { e.stopPropagation(); onOpenFlow && onOpenFlow(); }}>
+                Open conversation
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// Message article list — Heatmap の Message Detail Panel と Network の
+// Edge Messages Panel で共有する（同じ見た目・同じクリック挙動にするため）。
+// ============================================
+function MessageList({ messages, selectedMessageId, onSelectMessage, renderExtra }) {
+  if (!messages.length) {
+    return <p className="muted">No messages matched the current filters.</p>;
+  }
+  return messages.map(m => (
+    <article
+      className={`message clickable${m.message_id === selectedMessageId ? ' selected' : ''}`}
+      key={m.message_id}
+      onClick={() => onSelectMessage && onSelectMessage(m.message_id)}
+      title="Click to see this message's context / related messages"
+    >
+      {renderExtra && renderExtra(m)}
+      <div className="msg-meta">
+        {m.comm_id != null && <span className="comm-id">#{m.comm_id}</span>}
+        <b>{m.timestamp}</b>
+        <span>{m.agent_label}</span>
+        <span>{m.channel}</span>
+        <span>{m.message_type}</span>
+        <span>{m.visibility}</span>
+        {m.keyword_score > 0 && <span className="keyword-score">keyword score: {m.keyword_score}</span>}
+        {m.is_merger_related && <span className="merger">content merger-related</span>}
+        {m.internal_merger_related && <span className="internal-merger">internal merger-related</span>}
+      </div>
+      <div className="sub-meta">
+        Role: {m.agent_role || '-'} / Recipients: {formatRecipients(m.recipients)} / Responding to: {m.responding_to || '-'}
+      </div>
+      <p>{m.content}</p>
+      {(m.internal_reacting || m.internal_rationalizing || m.internal_deliberating) && (
+        <details onClick={e => e.stopPropagation()}>
+          <summary>internal state</summary>
+          {m.internal_reacting && <p><b>reacting:</b> {m.internal_reacting}</p>}
+          {m.internal_rationalizing && <p><b>rationalizing:</b> {m.internal_rationalizing}</p>}
+          {m.internal_deliberating && <p><b>deliberating:</b> {m.internal_deliberating}</p>}
+        </details>
+      )}
+    </article>
+  ));
+}
+
+// ============================================
+// Network edge click → Edge Messages Panel（Heatmapのchat panelと同じ見た目）
+// ============================================
+function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollapsed, selectedMessageId, messageContext, contextStatus, onSelectMessage, onOpenFlow }) {
+  if (!selectedEdge) {
+    return <div className="detail-card empty"><span className="muted">Click a network edge to see the messages behind that connection here.</span></div>;
+  }
+  const { sourceLabel, targetLabel, channel, inferred } = selectedEdge;
+  return (
+    <div className="detail-card">
+      <div className="detail-summary" onClick={() => setCollapsed(c => !c)}>
+        <button className="collapse-btn" aria-label="toggle">
+          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        </button>
+        <div className="ds-text">
+          <b>{sourceLabel}</b> {inferred ? 'mentions' : '→'} <b>{targetLabel}</b>
+          {!inferred && <><span className="ds-pipe">|</span> {channel}</>}
+          <span className="ds-pipe">|</span> {messages.length} messages
+        </div>
+        <span className="ds-hint">{collapsed ? 'Expand messages' : 'Collapse'}</span>
+      </div>
+
+      {!collapsed && (
+        <div className="detail-body">
+          <h3>Messages ({messages.length})</h3>
+          <MessageList messages={messages} selectedMessageId={selectedMessageId} onSelectMessage={onSelectMessage} />
+
           {selectedMessageId && (
             <div className="ctx-hint">
               <span className="muted">
@@ -1643,6 +1822,50 @@ function ConversationFlowModal({ open, context, selectedMessageId, onClose, onSe
 
         <div className="flow-list">
           {thread.map(item => renderBubble(item))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// Ajay's hints timeline (modal) — Ajayは実データ上のAgentではなく、
+// 他agentのmessage/内部思考の中で引用・言及されるだけの人物（CEO）。
+// mention数の集計ではなく、実際に何と言われたかを時系列で読めるようにする。
+// ============================================
+function AjayTimelineModal({ open, messages, status, onClose, selectedMessageId, onSelectMessage }) {
+  if (!open) return null;
+  return (
+    <div className="flow-overlay" onClick={onClose}>
+      <div className="flow-modal" onClick={e => e.stopPropagation()}>
+        <div className="flow-modal-head">
+          <div>
+            <h3>Ajay's hints timeline</h3>
+            <div className="flow-sub">
+              Ajay never sends a message himself — these are the messages where other agents
+              quote or refer to him, in chronological order · {messages.length} message{messages.length === 1 ? '' : 's'}
+            </div>
+          </div>
+          <button className="flow-close" onClick={onClose}>✕</button>
+        </div>
+
+        {status === 'loading' && <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Loading…</p>}
+        {status === 'error' && <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Could not load Ajay's timeline (is the backend running?).</p>}
+        {status === '' && messages.length === 0 && (
+          <p className="muted" style={{ padding: '8px 16px' }}>No messages mention Ajay under the current filters.</p>
+        )}
+
+        <div className="flow-list">
+          <MessageList
+            messages={messages}
+            selectedMessageId={selectedMessageId}
+            onSelectMessage={onSelectMessage}
+            renderExtra={(m) => (m.ajay_quotes && m.ajay_quotes.length > 0) ? (
+              <div className="ajay-quotes">
+                {m.ajay_quotes.map((q, i) => <span className="ajay-quote-chip" key={i}>&ldquo;{q}&rdquo;</span>)}
+              </div>
+            ) : null}
+          />
         </div>
       </div>
     </div>

@@ -1753,6 +1753,233 @@ def network(
     }
 
 
+def fetch_messages_for_edge(
+    source_agent_id: str,
+    target_agent_id: str,
+    channel: str = "",
+    merger_only: bool = False,
+    message_types: Optional[list[str]] = None,
+    message_type: str = "all",
+    text_sources: Optional[list[str]] = None,
+    visibility: str = "all",
+    start_time: str = "",
+    end_time: str = "",
+    keyword: str = "",
+):
+    """
+    Network の1本のedge（source agent -> target agent、channel別）の裏にある
+    実際のmessageを返す。/api/network の edge_query / ajay_query と同じ
+    マッチ条件を使い、集計せずmessageそのものを返す点だけが違う。
+
+    target_agent_id == 'ajay' の場合は reply graph ではなく、Ajay mention
+    ベースの inferred edge（/api/network の ajay_query）として扱う。
+    """
+    selected_message_types = normalize_message_types(message_types, message_type)
+    selected_text_sources = normalize_text_sources(text_sources)
+    normalized_keyword = keyword.lower().strip()
+
+    params = dict(
+        source_agent_id=source_agent_id,
+        target_agent_id=target_agent_id,
+        channel=channel or "",
+        merger_only=merger_only,
+        message_types=selected_message_types,
+        text_sources=selected_text_sources,
+        visibility=visibility,
+        start_time=start_time,
+        end_time=end_time,
+        keyword=normalized_keyword,
+    )
+
+    if target_agent_id == "ajay":
+        # Ajay は実データ上のAgentではない（mention-basedのinferred node）。
+        # source agentのmessageのうち、'ajay'を言及しているものを返す。
+        query = f"""
+        MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
+        WHERE a.agent_id = $source_agent_id
+          AND (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
+               OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
+               OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
+               OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
+          {_common_where_clause()}
+        WITH a, m, r, {keyword_score_expression()} AS keyword_score
+        RETURN m.message_id AS message_id,
+               m.comm_id AS comm_id,
+               m.timestamp_raw AS timestamp,
+               m.agent_id AS agent_id,
+               m.agent_role AS agent_role,
+               m.agent_label AS agent_label,
+               m.channel AS channel,
+               m.message_type AS message_type,
+               m.visibility AS visibility,
+               m.recipients AS recipients,
+               m.responding_to AS responding_to,
+               m.is_merger_related AS is_merger_related,
+               coalesce(m.internal_merger_related, false) AS internal_merger_related,
+               coalesce(m.internal_reacting_merger_related, false) AS internal_reacting_merger_related,
+               coalesce(m.internal_rationalizing_merger_related, false) AS internal_rationalizing_merger_related,
+               coalesce(m.internal_deliberating_merger_related, false) AS internal_deliberating_merger_related,
+               m.content AS content,
+               m.internal_reacting AS internal_reacting,
+               m.internal_rationalizing AS internal_rationalizing,
+               m.internal_deliberating AS internal_deliberating,
+               r.hour AS round_hour,
+               r.event_headline AS event_headline,
+               keyword_score AS keyword_score
+        ORDER BY timestamp
+        """
+    else:
+        # 通常のreply edge: sender(source) が target agent の message に返信したもの。
+        query = f"""
+        MATCH (sender:Agent)-[:SENT]->(m:Message)-[:REPLIES_TO]->(target:Message)<-[:SENT]-(targetAgent:Agent)
+        MATCH (m)-[:IN_ROUND]->(r:Round)
+        WHERE sender.agent_id = $source_agent_id
+          AND targetAgent.agent_id = $target_agent_id
+          AND ($channel = '' OR coalesce(m.channel, 'unknown') = $channel)
+          {_common_where_clause()}
+        WITH m, r, {keyword_score_expression()} AS keyword_score
+        RETURN m.message_id AS message_id,
+               m.comm_id AS comm_id,
+               m.timestamp_raw AS timestamp,
+               m.agent_id AS agent_id,
+               m.agent_role AS agent_role,
+               m.agent_label AS agent_label,
+               m.channel AS channel,
+               m.message_type AS message_type,
+               m.visibility AS visibility,
+               m.recipients AS recipients,
+               m.responding_to AS responding_to,
+               m.is_merger_related AS is_merger_related,
+               coalesce(m.internal_merger_related, false) AS internal_merger_related,
+               coalesce(m.internal_reacting_merger_related, false) AS internal_reacting_merger_related,
+               coalesce(m.internal_rationalizing_merger_related, false) AS internal_rationalizing_merger_related,
+               coalesce(m.internal_deliberating_merger_related, false) AS internal_deliberating_merger_related,
+               m.content AS content,
+               m.internal_reacting AS internal_reacting,
+               m.internal_rationalizing AS internal_rationalizing,
+               m.internal_deliberating AS internal_deliberating,
+               r.hour AS round_hour,
+               r.event_headline AS event_headline,
+               keyword_score AS keyword_score
+        ORDER BY timestamp
+        """
+
+    with get_driver().session() as session:
+        return [dict(r) for r in session.run(query, **params)]
+
+
+@app.get("/api/edge-messages")
+def edge_messages(
+    source: str,
+    target: str,
+    channel: str = "",
+    merger_only: bool = False,
+    message_types: Optional[list[str]] = Query(default=None),
+    message_type: str = "all",
+    text_sources: Optional[list[str]] = Query(default=None),
+    visibility: str = Query("all", pattern="^(all|internal|external)$"),
+    start_time: str = "",
+    end_time: str = "",
+    keyword: str = "",
+):
+    """
+    Network graph の1本のedgeをクリックしたときに、そのedgeの裏にある実際の
+    messageをHeatmapのMessage Detail Panelと同じ形で返すAPI。filterは
+    /api/network と同じセットを受け付ける（同じ networkQuery をそのまま使える）。
+    """
+    return fetch_messages_for_edge(
+        source_agent_id=source,
+        target_agent_id=target,
+        channel=channel,
+        merger_only=merger_only,
+        message_types=message_types,
+        message_type=message_type,
+        text_sources=text_sources,
+        visibility=visibility,
+        start_time=start_time,
+        end_time=end_time,
+        keyword=keyword,
+    )
+
+
+@app.get("/api/ajay-timeline")
+def ajay_timeline(
+    merger_only: bool = False,
+    message_types: Optional[list[str]] = Query(default=None),
+    message_type: str = "all",
+    text_sources: Optional[list[str]] = Query(default=None),
+    visibility: str = Query("all", pattern="^(all|internal|external)$"),
+    start_time: str = "",
+    end_time: str = "",
+    keyword: str = "",
+):
+    """
+    "Ajay's hints timeline" パネル用API。/api/network の ajay_query と同じ
+    マッチ条件（content / inner thoughtに'ajay'を含む）でmessageを集め、
+    集計せず時系列のmessage一覧として返す。各messageには heuristic に抽出した
+    引用フレーズ（ajay_quotes）を添えて、CEOが何をほのめかしていったかを
+    素早く拾い読みできるようにする。
+    """
+    selected_message_types = normalize_message_types(message_types, message_type)
+    selected_text_sources = normalize_text_sources(text_sources)
+    normalized_keyword = keyword.lower().strip()
+
+    query = f"""
+    MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
+    WHERE (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
+           OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
+      {_common_where_clause()}
+    WITH a, m, r, {keyword_score_expression()} AS keyword_score
+    RETURN m.message_id AS message_id,
+           m.comm_id AS comm_id,
+           m.timestamp_raw AS timestamp,
+           m.agent_id AS agent_id,
+           m.agent_role AS agent_role,
+           m.agent_label AS agent_label,
+           m.channel AS channel,
+           m.message_type AS message_type,
+           m.visibility AS visibility,
+           m.recipients AS recipients,
+           m.responding_to AS responding_to,
+           m.is_merger_related AS is_merger_related,
+           coalesce(m.internal_merger_related, false) AS internal_merger_related,
+           coalesce(m.internal_reacting_merger_related, false) AS internal_reacting_merger_related,
+           coalesce(m.internal_rationalizing_merger_related, false) AS internal_rationalizing_merger_related,
+           coalesce(m.internal_deliberating_merger_related, false) AS internal_deliberating_merger_related,
+           m.content AS content,
+           m.internal_reacting AS internal_reacting,
+           m.internal_rationalizing AS internal_rationalizing,
+           m.internal_deliberating AS internal_deliberating,
+           r.hour AS round_hour,
+           r.event_headline AS event_headline,
+           keyword_score AS keyword_score
+    ORDER BY timestamp
+    """
+    params = dict(
+        merger_only=merger_only,
+        message_types=selected_message_types,
+        text_sources=selected_text_sources,
+        visibility=visibility,
+        start_time=start_time,
+        end_time=end_time,
+        keyword=normalized_keyword,
+    )
+
+    with get_driver().session() as session:
+        rows = [dict(r) for r in session.run(query, **params)]
+
+    for row in rows:
+        row["ajay_quotes"] = extract_ajay_quotes(
+            row.get("content"),
+            row.get("internal_reacting"),
+            row.get("internal_rationalizing"),
+            row.get("internal_deliberating"),
+        )
+    return rows
+
+
 @app.get("/api/messages")
 def messages(
     agent_id: str,
@@ -1817,6 +2044,34 @@ def _keywords_in(text: str) -> List[str]:
         if pat.search(text) and kw not in found:
             found.append(kw)
     return found
+
+
+# ============================================================
+# Ajay's hints timeline
+# ============================================================
+# Ajay はデータ上のAgentではなく、他agentのmessage/内部思考に引用・言及される
+# だけの人物（CEO）。/api/network の "Ajay" 推論nodeは mention 数だけを見せていて
+# 実際に何と言われたかが見えないため、'ajay' を含むmessageから引用符付きの
+# フレーズを抜き出し、時系列で読めるようにする。
+
+# 二重引用符で囲まれた4〜240文字のフレーズを拾う。厳密な帰属判定ではなく
+# （どの引用符がAjayの発言かをNLPで判定してはいない）、"ajayを含むmessageの中で
+# 引用されている文言" を素早く拾い読みするための heuristic。本文全体も
+# 別途表示されるので、誤って無関係な引用を拾っても実害は小さい。
+_QUOTE_SPAN_PATTERN = re.compile(r'"([^"]{4,240})"')
+
+
+def extract_ajay_quotes(*texts: str) -> List[str]:
+    """'ajay' を含むtext群から引用符付きフレーズを抽出する（重複除去・出現順）。"""
+    quotes: List[str] = []
+    for t in texts:
+        if not t:
+            continue
+        for m in _QUOTE_SPAN_PATTERN.finditer(t):
+            q = m.group(1).strip()
+            if q and q not in quotes:
+                quotes.append(q)
+    return quotes
 
 
 def _project_related(m: Dict[str, Any], relation_type: str, relation_reason: str) -> Dict[str, Any]:

@@ -107,9 +107,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 /* vertical stack variant: each option on its own full-width row (no text overlap in narrow sidebar) */
 .nv-head-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .ajay-toggle { font-size: 12px; color: #d8c074; white-space: nowrap; }
+.ajay-hints-btn { background: transparent; border: 1px solid #c9a227; color: #d8c074; border-radius: 9px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ajay-hints-btn:hover { background: rgba(201, 162, 39, 0.14); }
+.ajay-quotes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ajay-quote-chip { background: rgba(201, 162, 39, 0.12); border: 1px solid rgba(201, 162, 39, 0.5); color: #e8d090; border-radius: 8px; padding: 3px 9px; font-size: 12px; font-style: italic; }
 .net-legend .nl-line.nl-dash { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px); }
-.netmode-seg { flex: 0 0 auto; }
-.netmode-seg .seg-btn { flex: 0 0 auto; min-width: auto; }
+.netmode-toggles { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.netmode-toggle { font-size: 12px; white-space: nowrap; }
 .seg-stack { flex-direction: column; flex-wrap: nowrap; }
 .seg-stack .seg-btn { flex: none; width: 100%; text-align: left; }
 
@@ -216,6 +220,11 @@ summary { cursor: pointer; }
 .net-edge.highlighted .edge-arrow { fill-opacity: 1 !important; }
 .net-node.selected .n-circle { stroke-width: 3.5; }
 .net-node.selected .n-ring { stroke-opacity: .55; }
+/* クリックして選択したedge。hover由来のhighlightedとは別に、選択が続く限り常時強調する */
+.net-edge.selected .edge-path { stroke-opacity: 1 !important; }
+.net-edge.selected .edge-glow { stroke-opacity: .22 !important; }
+.net-edge.selected .edge-arrow { fill-opacity: 1 !important; }
+.net-edge.selected .net-edge-lbl { opacity: 1; }
 .n-abbr { font-weight: 700; pointer-events: none; }
 .n-badge-txt { fill: #fff; pointer-events: none; }
 /* weight ラベルは既定で隠し、hover / highlight の edge だけ表示（有向化で edge が増えても煩雑にしない） */

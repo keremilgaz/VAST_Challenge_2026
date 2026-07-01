@@ -80,6 +80,8 @@ export default function NetworkVisualization({
   colorBySentiment = false,
   selectedNode,
   onSelectNode,
+  selectedEdge,
+  onSelectEdge,
   followingHeatmapSort = false,
   heatmapOrder = [],
   heatmapSortKey = 'agent_id',
@@ -204,6 +206,7 @@ export default function NetworkVisualization({
     edgeLblEnter.append('text').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 700);
 
     const edgeSel = edgeEnter.merge(edgeData);
+    edgeSel.classed('selected', e => selectedEdge === edgeKey(e));
     edgeSel.select('.edge-glow').style('stroke', e => channelColor(e.channel))
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
     // inferred（Ajay 言及）エッジは破線で「実データの reply ではない」と分かるようにする
@@ -212,6 +215,10 @@ export default function NetworkVisualization({
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
     edgeSel.select('.edge-arrow').style('fill', e => channelColor(e.channel));
     edgeSel.select('.edge-hit')
+      .on('click', function (ev, e) {
+        ev.stopPropagation();
+        onSelectEdge && onSelectEdge(e);
+      })
       .on('mouseenter', function (ev, e) {
         const fa = AGENTS[e.source]?.label || e.source;
         const ta = AGENTS[e.target]?.label || e.target;
@@ -367,7 +374,7 @@ export default function NetworkVisualization({
     if (selectedNode) highlightNode(selectedNode);
 
     return () => {};
-  }, [data, layout, sizeMetric, edgeMetric, colorBySentiment, onSelectNode, followingHeatmapSort, heatmapOrder, heatmapSortKey, heatmapSortDir]);
+  }, [data, layout, sizeMetric, edgeMetric, colorBySentiment, onSelectNode, onSelectEdge, followingHeatmapSort, heatmapOrder, heatmapSortKey, heatmapSortDir]);
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
@@ -377,6 +384,13 @@ export default function NetworkVisualization({
         d3.select(this).select('.n-label').attr('opacity', (d.inferred || d.id === selectedNode) ? 1 : 0);
       });
   }, [selectedNode, data]);
+
+  // edge選択のハイライトだけを独立して更新（node effectと同じパターン）。
+  useEffect(() => {
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('g.net-edge')
+      .classed('selected', d => `${d.source}>${d.target}>${d.channel}` === selectedEdge);
+  }, [selectedEdge, data]);
 
   // 現在の edges に存在する channel を legend 用に集計
   const channelTotals = {};
