@@ -90,6 +90,10 @@ export default function NetworkVisualization({
   const svgRef = useRef(null);
   const tooltipRef = useRef(null);
   const simRef = useRef(null);
+  // drag で動かしたnode位置を保持するref。effect本体のstateではないので、
+  // timeline scrub等でdataが変わってeffectが再実行されても中身は消えない
+  // （= 手動で組んだlayoutが time slider を動かすたびにリセットされるのを防ぐ）。
+  const posRef = useRef({});
 
   useEffect(() => {
     const nodes = (data?.nodes || []).map(n => ({ ...n }));
@@ -129,7 +133,8 @@ export default function NetworkVisualization({
     const maxSize = d3.max(nodes, sizeValue) || 1;
     nodes.forEach(n => {
       n.r = nodeRadius(sizeValue(n), maxSize);
-      const init = NP[n.id] || { x: W / 2, y: H / 2 };
+      // drag済みの位置があればそれを優先し、無ければ既定配置を使う。
+      const init = posRef.current[n.id] || NP[n.id] || { x: W / 2, y: H / 2 };
       n.x = init.x; n.y = init.y;
     });
 
@@ -369,7 +374,11 @@ export default function NetworkVisualization({
 
     nodeSel.call(d3.drag()
       .on('start', function () { d3.select(this).raise(); })
-      .on('drag', (ev, d) => { d.x = ev.x; d.y = ev.y; ticked(); }));
+      .on('drag', (ev, d) => {
+        d.x = ev.x; d.y = ev.y;
+        posRef.current[d.id] = { x: ev.x, y: ev.y }; // 次回effect実行時もこの位置を使う
+        ticked();
+      }));
 
     if (selectedNode) highlightNode(selectedNode);
 
