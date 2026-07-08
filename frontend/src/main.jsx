@@ -19,16 +19,16 @@ import { RefreshCcw, Play, Pause } from 'lucide-react';
 import NetworkVisualization, { AGENTS } from './network.jsx';
 import './style.css';
 
-import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL } from './constants.js';
+import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL, EVENT_MARKERS } from './constants.js';
 import {
   shortBucket, countColor, sentimentCellColor, semanticCellColor,
-  apiTimeToInputValue, inputValueToApiTime, fmtSigned,
+  apiTimeToInputValue, inputValueToApiTime, fmtSigned, fmtRoundLabel, timeToBucket,
 } from './utils.js';
 import { Collapsible } from './components/Collapsible.jsx';
 import { CrisisTimeline } from './components/CrisisTimeline.jsx';
 import { StockSentimentLineChart } from './components/StockSentimentLineChart.jsx';
 import {
-  MessageDetailPanel, EdgeMessagesPanel, ConversationFlowModal, AjayTimelineModal,
+  MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal, AjayTimelineModal,
 } from './components/messagePanels.jsx';
 
 
@@ -36,7 +36,7 @@ function App() {
   // ---- 共通filter state (heatmap / network / line chart 共通) ----
   const [granularity, setGranularity] = useState('hourly');
   const [mergerOnly, setMergerOnly] = useState(false);
-  const [selectedMessageTypes, setSelectedMessageTypes] = useState([]);
+  const [selectedCombos, setSelectedCombos] = useState([]);
   const [selectedTextSources, setSelectedTextSources] = useState([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [agentFilter, setAgentFilter] = useState([]); // 空=All
@@ -60,6 +60,9 @@ function App() {
   const [netMirrorsHeatmap, setNetMirrorsHeatmap] = useState(false);
   const [netFollowsTimeline, setNetFollowsTimeline] = useState(false);
   const [selectedNetworkNode, setSelectedNetworkNode] = useState(null);
+  // ---- node click → Node Messages Panel (broadcast/root mesajlar dahil) ----
+  const [nodeMessages, setNodeMessages] = useState([]);
+  const [isNodeDetailCollapsed, setIsNodeDetailCollapsed] = useState(false);
   // ---- network edge click → Edge Messages Panel ----
   const [selectedEdge, setSelectedEdge] = useState(null); // { key, source, target, sourceLabel, targetLabel, channel, inferred }
   const [edgeMessages, setEdgeMessages] = useState([]);
@@ -71,7 +74,7 @@ function App() {
   const [ajayTimelineStatus, setAjayTimelineStatus] = useState(''); // '', 'loading', 'error'
 
   // network専用 filter（heatmapの計算には一切影響させない。networkだけに適用する）
-  const [netMessageTypes, setNetMessageTypes] = useState([]);
+  const [netCombos, setNetCombos] = useState([]);
   const [netMergerOnly, setNetMergerOnly] = useState(false);
   const [netAgentFilter, setNetAgentFilter] = useState([]); // 空=All（client側でnode絞り込み）
   const [netStartTime, setNetStartTime] = useState('');
@@ -103,7 +106,7 @@ function App() {
 
   // ---- データ ----
   const [options, setOptions] = useState({
-    message_types: [], text_sources: ['content', 'reacting', 'rationalizing', 'deliberating'],
+    message_types: [], channels: [], channel_types: [], text_sources: ['content', 'reacting', 'rationalizing', 'deliberating'],
     agents: [], merger_count: 0, internal_merger_count: 0, combined_merger_count: 0,
     total_count: 0, min_time: '', max_time: '', merger_keywords: [],
   });
@@ -145,14 +148,14 @@ function App() {
     const p = new URLSearchParams();
     p.set('granularity', granularity);
     p.set('merger_only', mergerOnly ? 'true' : 'false');
-    selectedMessageTypes.forEach(t => p.append('message_types', t));
+    selectedCombos.forEach(t => p.append('message_types', t));
     selectedTextSources.forEach(s => p.append('text_sources', s));
     // Heatmap の時間窓は crisis timeline が常に支配する（手動 time range は廃止）。
     if (timelineStart) p.set('start_time', timelineStart);
     if (timelineEnd) p.set('end_time', timelineEnd);
     if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
     return p.toString();
-  }, [granularity, mergerOnly, selectedMessageTypes, selectedTextSources, searchKeyword, timelineStart, timelineEnd]);
+  }, [granularity, mergerOnly, selectedCombos, selectedTextSources, searchKeyword, timelineStart, timelineEnd]);
 
   // ============================================
   // network専用のquery string（heatmapとは独立。networkだけに効く）
@@ -166,13 +169,13 @@ function App() {
     if (netMirrorsHeatmap) {
       // 'heatmap': heatmap の filter context をそのまま採用する。
       p.set('merger_only', mergerOnly ? 'true' : 'false');
-      selectedMessageTypes.forEach(t => p.append('message_types', t));
+      selectedCombos.forEach(t => p.append('message_types', t));
       selectedTextSources.forEach(s => p.append('text_sources', s));
       if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
     } else {
       // 'independent' / 'timeline': network 専用 filter を使う。
       p.set('merger_only', netMergerOnly ? 'true' : 'false');
-      netMessageTypes.forEach(t => p.append('message_types', t));
+      netCombos.forEach(t => p.append('message_types', t));
     }
 
     // --- time window ---
@@ -188,8 +191,8 @@ function App() {
     if (showAjay) p.set('include_ajay', 'true');
     return p.toString();
   }, [granularity, netMirrorsHeatmap, netFollowsTimeline,
-      mergerOnly, selectedMessageTypes, selectedTextSources, searchKeyword,
-      netMergerOnly, netMessageTypes, netStartTime, netEndTime,
+      mergerOnly, selectedCombos, selectedTextSources, searchKeyword,
+      netMergerOnly, netCombos, netStartTime, netEndTime,
       timelineStart, timelineEnd, showAjay]);
 
   // ============================================
@@ -266,6 +269,26 @@ function App() {
   useEffect(() => { loadHeatmap(); }, [loadHeatmap]);
   useEffect(() => { loadLineChart(); }, [loadLineChart]);
   useEffect(() => { loadNetwork(); }, [loadNetwork]);
+
+  // Seçili node'un tüm gönderdiği mesajları getir (edge'i olmayan broadcast/root
+  // mesajlar dahil — bunlar edge tıklamasıyla görülemiyordu). Ajay gerçek bir
+  // agent olmadığı için onun yerine "Ajay's hints timeline" kullanılır.
+  useEffect(() => {
+    if (!selectedNetworkNode || selectedNetworkNode === 'ajay') { setNodeMessages([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = new URLSearchParams(networkQuery);
+        p.set('agent_id', selectedNetworkNode);
+        const res = await fetch(`${API}/api/node-messages?${p.toString()}`);
+        const rows = res.ok ? await res.json() : [];
+        if (!cancelled) { setNodeMessages(rows); setIsNodeDetailCollapsed(false); }
+      } catch (e) {
+        if (!cancelled) setNodeMessages([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedNetworkNode, networkQuery]);
 
   // ---- crisis timeline playback (Play/Pause) ----
   useEffect(() => {
@@ -352,7 +375,36 @@ function App() {
   });
   const agentIds = () => (options.agents || []).map(a => a.agent_id);
 
-  const toggleMessageType = (t) => toggleInSet(setSelectedMessageTypes, options.message_types || [], t);
+  // ============================================================
+  // Message channel × message_type の複合フィルタ選択肢を組み立てる
+  // ============================================================
+  // options.channel_types = [{channel, message_type, count, key}]（backend meta 由来）。
+  // 1つの channel が複数 message_type を持つときだけラベルに (message_type) を付ける。
+  //   例: comms_huddle は broadcast/action に割れる → "comms_huddle (broadcast)" /
+  //       "comms_huddle (action)"。それ以外は channel 名のみ表示。
+  // これで comms_huddle の broadcast/action も、public_post の personal/official/anonymous も
+  // すべて個別に選べ、実在する7通りで全メッセージを漏れなく（網羅的に）カバーする。
+  const comboOptions = useMemo(() => {
+    const list = options.channel_types || [];
+    const typesPerChannel = {};
+    list.forEach(o => {
+      (typesPerChannel[o.channel] = typesPerChannel[o.channel] || new Set()).add(o.message_type);
+    });
+    return list.map(o => ({
+      key: o.key || `${o.channel}|${o.message_type}`,
+      channel: o.channel,
+      message_type: o.message_type,
+      count: o.count,
+      group: visibilityGroupOf(o.channel),
+      label: typesPerChannel[o.channel].size > 1
+        ? `${o.channel} (${o.message_type})`
+        : o.channel,
+    }));
+  }, [options.channel_types]);
+  const allComboKeys = comboOptions.map(c => c.key);
+  const comboLabel = (key) => (comboOptions.find(c => c.key === key)?.label) || key;
+
+  const toggleCombo = (t) => toggleInSet(setSelectedCombos, allComboKeys, t);
   const toggleTextSource = (s) => toggleInSet(setSelectedTextSources, options.text_sources || Object.keys(TEXT_SOURCE_LABELS), s);
 
   // inner thought の3ソースをまとめて on/off するためのヘルパ。
@@ -372,34 +424,31 @@ function App() {
     });
   };
 
-  // message types を visibility（internal / external）でグループ化する。
-  // 空配列 = 全 type 選択（= All）なので、グループ補助 UI もそれを踏まえて表示する。
-  const messageTypesByGroup = useMemo(() => {
-    const all = options.message_types || [];
-    return {
-      external: all.filter(t => visibilityGroupOf(t) === 'external'),
-      internal: all.filter(t => visibilityGroupOf(t) === 'internal'),
-    };
-  }, [options.message_types]);
+  // message channel×type を visibility（internal / external）でグループ化する。
+  // 空配列 = 全選択（= All）なので、グループ補助 UI もそれを踏まえて表示する。
+  const combosByGroup = useMemo(() => ({
+    external: comboOptions.filter(c => c.group === 'external'),
+    internal: comboOptions.filter(c => c.group === 'internal'),
+  }), [comboOptions]);
 
-  // 「空配列 = All」を考慮して、ある type が実際に有効か判定する。
-  const isTypeActive = (t) => selectedMessageTypes.length === 0 || selectedMessageTypes.includes(t);
+  // 「空配列 = All」を考慮して、ある combo が実際に有効か判定する。
+  const isComboActive = (key) => selectedCombos.length === 0 || selectedCombos.includes(key);
 
-  // グループ内の type が全部有効か（空配列=All も全有効として扱う）。
-  const isGroupAllActive = (groupTypes) => groupTypes.length > 0 && groupTypes.every(isTypeActive);
+  // グループ内の combo が全部有効か（空配列=All も全有効として扱う）。
+  const isGroupAllActive = (groupCombos) => groupCombos.length > 0 && groupCombos.every(c => isComboActive(c.key));
 
   // グループ単位のトグル。空配列(All)状態から個別操作するときは、
-  // まず全 type を明示選択した状態に展開してから差分を適用する。
-  const toggleGroup = (groupTypes) => {
-    const allTypes = options.message_types || [];
-    setSelectedMessageTypes(prev => {
-      const base = prev.length === 0 ? allTypes.slice() : prev.slice();
-      const allOn = groupTypes.every(t => base.includes(t));
+  // まず全 combo を明示選択した状態に展開してから差分を適用する。
+  const toggleGroup = (groupCombos) => {
+    const groupKeys = groupCombos.map(c => c.key);
+    setSelectedCombos(prev => {
+      const base = prev.length === 0 ? allComboKeys.slice() : prev.slice();
+      const allOn = groupKeys.every(k => base.includes(k));
       let next = allOn
-        ? base.filter(t => !groupTypes.includes(t))   // グループ全 off
-        : Array.from(new Set([...base, ...groupTypes])); // グループ全 on
-      // 結果が全 type なら空配列(All)に正規化して見た目を揃える。
-      if (allTypes.length && allTypes.every(t => next.includes(t))) next = [];
+        ? base.filter(k => !groupKeys.includes(k))       // グループ全 off
+        : Array.from(new Set([...base, ...groupKeys]));   // グループ全 on
+      // 結果が全 combo なら空配列(All)に正規化して見た目を揃える。
+      if (allComboKeys.length && allComboKeys.every(k => next.includes(k))) next = [];
       return next;
     });
   };
@@ -424,7 +473,7 @@ function App() {
   const handleLineScroll = () => mirrorScroll(lineScrollRef.current, heatmapScrollRef.current);
 
   // network専用 filter の toggle / helper（heatmapには影響しない）
-  const toggleNetMessageType = (t) => toggleInSet(setNetMessageTypes, options.message_types || [], t);
+  const toggleNetCombo = (t) => toggleInSet(setNetCombos, allComboKeys, t);
   const toggleNetAgent = (id) => toggleInSet(setNetAgentFilter, agentIds(), id);
   const useFullNetTimeRange = () => { setNetStartTime(apiTimeToInputValue(options.min_time)); setNetEndTime(apiTimeToInputValue(options.max_time)); };
   const clearNetTimeRange = () => { setNetStartTime(''); setNetEndTime(''); };
@@ -435,7 +484,7 @@ function App() {
     // heatmap filters
     setSearchKeyword('');
     setMergerOnly(false);
-    setSelectedMessageTypes([]);
+    setSelectedCombos([]);
     setSelectedTextSources([]);
     setAgentFilter([]);
     setHeatmapSort({ key: 'agent_id', dir: 'asc' });
@@ -446,7 +495,7 @@ function App() {
     setColorBySentiment(false);
     setShowAjay(false);
     setNetMergerOnly(false);
-    setNetMessageTypes([]);
+    setNetCombos([]);
     setNetAgentFilter([]);
     setNetStartTime('');
     setNetEndTime('');
@@ -499,6 +548,13 @@ function App() {
   // effect全体が再実行され、drag等で動かしたnode位置がリセットされてしまう
   // （layoutが"resetする"バグの原因だった）。networkQueryが変わらない限り
   // 同じ関数参照を保つことでeffectの不要な再実行を防ぐ。
+  // node クリックで選択、同じ node を再クリックで選択解除。
+  // useCallback で参照を安定させ、NetworkVisualization の描画 effect が
+  // 毎 render 再実行されて drag 位置がリセットされるのを防ぐ（selectEdge と同じ理由）。
+  const handleSelectNode = useCallback((id) => {
+    setSelectedNetworkNode(prev => (prev === id ? null : id));
+  }, []);
+
   const selectEdge = useCallback(async (edge) => {
     const sourceLabel = AGENTS[edge.source]?.label || edge.source;
     const targetLabel = edge.inferred ? 'Ajay' : (AGENTS[edge.target]?.label || edge.target);
@@ -610,6 +666,18 @@ function App() {
   const cell = CELL[granularity];
   const buckets = heatmap.time_buckets || [];
 
+  // Olay işaretleri (leak / embargo) → bucket eşlemesi. Heatmap kolon başlığında
+  // nokta + kolon hücrelerinde renkli sol kenar olarak gösterilir.
+  const markersByBucket = useMemo(() => {
+    const map = new Map();
+    EVENT_MARKERS.forEach(mk => {
+      const b = timeToBucket(mk.time, granularity);
+      if (!map.has(b)) map.set(b, []);
+      map.get(b).push(mk);
+    });
+    return map;
+  }, [granularity]);
+
   // 選択中cellのsummary値
   const selectedCellData = selected ? cellMap.get(`${selected.agent.agent_id}|${selected.bucket}`) : null;
   const selectedSemantic = selectedCellData ? selectedCellData.semantic_distance_prev : null; 
@@ -701,43 +769,63 @@ function App() {
                       <button key={v} className={`seg-btn ${heatmapMode === v ? 'on' : ''}`} onClick={() => setHeatmapMode(v)}>{l}</button>
                     ))}
                   </div>
-                  
                 </Collapsible>
 
-                <Collapsible title="Message types" defaultOpen={false}>
-                  <label className="check select-all-row"><input type="checkbox" checked={selectedMessageTypes.length === 0} onChange={() => setSelectedMessageTypes([])} /> All</label>
+                {/* heatmapSort は rank chip（network の #1…#N）や mirror mode の説明でも
+                    参照されるが、以前のリファクタで並び替え UI 自体が消えていた。ここで復元する。 */}
+                <Collapsible title="Sort agent rows" defaultOpen={false}>
+                  <div className="seg seg-stack">
+                    {[['agent_id', 'Agent name'], ['total', 'Total messages'], ['sentiment', 'Mean sentiment']].map(([v, l]) => (
+                      <button key={v} className={`seg-btn ${heatmapSort.key === v ? 'on' : ''}`}
+                        disabled={v === 'sentiment' && heatmapMode !== 'sentiment'}
+                        title={v === 'sentiment' && heatmapMode !== 'sentiment'
+                          ? 'Switch heatmap mode to "BERT sentiment" first — sentiment values are only computed in that mode.'
+                          : undefined}
+                        onClick={() => setHeatmapSort(s => ({ ...s, key: v }))}>{l}</button>
+                    ))}
+                  </div>
+                  <div className="seg" style={{ marginTop: 6 }}>
+                    <button type="button" className="seg-btn"
+                      onClick={() => setHeatmapSort(s => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}>
+                      {heatmapSort.dir === 'asc' ? '↑ ascending' : '↓ descending'}
+                    </button>
+                  </div>
+                </Collapsible>
 
-                  {messageTypesByGroup.external.length > 0 && (
+                <Collapsible title="Message channel" defaultOpen={false}>
+                  <label className="check select-all-row"><input type="checkbox" checked={selectedCombos.length === 0} onChange={() => setSelectedCombos([])} /> All</label>
+
+                  {combosByGroup.external.length > 0 && (
                     <div className="type-group">
                       <label className="check group-head">
                         <input
                           type="checkbox"
-                          checked={isGroupAllActive(messageTypesByGroup.external)}
-                          onChange={() => toggleGroup(messageTypesByGroup.external)}
+                          checked={isGroupAllActive(combosByGroup.external)}
+                          onChange={() => toggleGroup(combosByGroup.external)}
                         />
                         External <span className="muted small">(public-facing)</span>
                       </label>
                       <div className="type-grid indent">
-                        {messageTypesByGroup.external.map(t => (
-                          <label className="check" key={t}><input type="checkbox" checked={isTypeActive(t)} onChange={() => toggleMessageType(t)} /> {t}</label>
+                        {combosByGroup.external.map(c => (
+                          <label className="check" key={c.key}><input type="checkbox" checked={isComboActive(c.key)} onChange={() => toggleCombo(c.key)} /> {c.label}</label>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {messageTypesByGroup.internal.length > 0 && (
+                  {combosByGroup.internal.length > 0 && (
                     <div className="type-group">
                       <label className="check group-head">
                         <input
                           type="checkbox"
-                          checked={isGroupAllActive(messageTypesByGroup.internal)}
-                          onChange={() => toggleGroup(messageTypesByGroup.internal)}
+                          checked={isGroupAllActive(combosByGroup.internal)}
+                          onChange={() => toggleGroup(combosByGroup.internal)}
                         />
                         Internal <span className="muted small">(in-org conversation)</span>
                       </label>
                       <div className="type-grid indent">
-                        {messageTypesByGroup.internal.map(t => (
-                          <label className="check" key={t}><input type="checkbox" checked={isTypeActive(t)} onChange={() => toggleMessageType(t)} /> {t}</label>
+                        {combosByGroup.internal.map(c => (
+                          <label className="check" key={c.key}><input type="checkbox" checked={isComboActive(c.key)} onChange={() => toggleCombo(c.key)} /> {c.label}</label>
                         ))}
                       </div>
                     </div>
@@ -810,7 +898,7 @@ function App() {
                 <div>
                   <h2>{granularity === 'daily' ? 'Daily' : 'Hourly'} · {heatmapMode === 'count' ? 'message volume' : heatmapMode === 'sentiment' ? 'BERT sentiment' : 'semantic change'}</h2>
                   <p className="muted small">
-                    {selectedMessageTypes.length === 0 ? 'All types' : selectedMessageTypes.join(', ')}
+                    {selectedCombos.length === 0 ? 'All channels' : selectedCombos.map(comboLabel).join(', ')}
                     {' / '}{selectedTextSources.length === 0 ? 'All text' : selectedTextSources.map(s => TEXT_SOURCE_LABELS[s] || s).join(', ')}
                     {searchKeyword.trim() ? ` / Keyword: ${searchKeyword.trim()}` : ''}
                   </p>
@@ -828,16 +916,31 @@ function App() {
               <div className="heatmap-scroll" ref={heatmapScrollRef} onScroll={handleHeatmapScroll}>
                 <div className="heatmap-grid" style={{ gridTemplateColumns: `${LABEL_COL}px repeat(${buckets.length || 1}, ${cell.w}px)`, gridAutoRows: `${cell.h}px` }}>
                   <div className="corner">Agent \ Time</div>
-                  {buckets.map(b => (
-                    <button key={b} className="bucket-head" title={b}
-                      onClick={() => selectCell({ agent_id: 'ALL', agent_label: 'All agents' }, b)}>
-                      {shortBucket(b, granularity)}
-                    </button>
-                  ))}
+                  {buckets.map(b => {
+                    const mks = markersByBucket.get(b);
+                    return (
+                      <button key={b}
+                        className={`bucket-head ${mks ? 'has-marker' : ''}`}
+                        style={mks ? { '--mk-color': mks[0].color } : undefined}
+                        title={mks ? `${b} — ${mks.map(m => m.label).join(' · ')}` : b}
+                        onClick={() => selectCell({ agent_id: 'ALL', agent_label: 'All agents' }, b)}>
+                        {shortBucket(b, granularity)}{mks && <span className="mk-dot" />}
+                      </button>
+                    );
+                  })}
 
                   {sortedAgents.map(agent => (
                     <React.Fragment key={agent.agent_id}>
-                      <div className="agent-label" style={{ borderLeft: `3px solid ${AGENTS[agent.agent_id]?.color || '#888'}` }}>
+                      {/* Görünümler arası bağlantı (brushing): satır etiketine tıklayınca
+                          network'te aynı agent'ın node'u seçilir; network'te node seçilince
+                          de bu satır vurgulanır. Tekrar tıklama seçimi kaldırır. */}
+                      <div
+                        className={`agent-label ${selectedNetworkNode === agent.agent_id ? 'row-selected' : ''}`}
+                        style={{ borderLeft: `3px solid ${AGENTS[agent.agent_id]?.color || '#888'}` }}
+                        onClick={() => handleSelectNode(agent.agent_id)}
+                        title="Click to highlight this agent in the network (click again to deselect)"
+                        role="button" tabIndex={0}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') handleSelectNode(agent.agent_id); }}>
                         {agent.agent_label}
                       </div>
                       {buckets.map(b => {
@@ -866,10 +969,11 @@ function App() {
                             : `${agent.agent_label} ${b}: semantic distance ${dist.toFixed(2)}`;
                           cellValue = dist == null ? '' : dist.toFixed(2);
                         }
+                        const mks = markersByBucket.get(b);
                         return (
                           <button key={`${agent.agent_id}-${b}`}
-                            className={`cell ${heatmapMode !== 'count' ? 'cell-num' : ''} ${isSel ? 'cell-selected' : ''}`}
-                            style={style} title={title}
+                            className={`cell ${heatmapMode !== 'count' ? 'cell-num' : ''} ${isSel ? 'cell-selected' : ''} ${mks ? 'cell-marked' : ''}`}
+                            style={mks ? { ...style, '--mk-color': mks[0].color } : style} title={title}
                             onClick={() => selectCell(agent, b)}>
                             {heatmapMode === 'count' ? (count || '') : cellValue}
                           </button>
@@ -939,11 +1043,11 @@ function App() {
                 <Collapsible title="Network filters" defaultOpen={true}>
                   {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — these network filters are taken from the heatmap.</div>}
                   <div className={netMirrorsHeatmap ? 'disabled' : ''}>
-                  <div className="control-title">Message type</div>
-                  <label className="check select-all-row"><input type="checkbox" checked={netMessageTypes.length === 0} onChange={() => setNetMessageTypes([])} /> All</label>
+                  <div className="control-title">Message channel</div>
+                  <label className="check select-all-row"><input type="checkbox" checked={netCombos.length === 0} onChange={() => setNetCombos([])} /> All</label>
                   <div className="type-grid">
-                    {(options.message_types || []).map(t => (
-                      <label className="check" key={`net-${t}`}><input type="checkbox" checked={isInSet(netMessageTypes, t)} onChange={() => toggleNetMessageType(t)} /> {t}</label>
+                    {comboOptions.map(c => (
+                      <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isInSet(netCombos, c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
                     ))}
                   </div>
                   <div className="control-title">Agent type</div>
@@ -967,6 +1071,38 @@ function App() {
                     Merger-related keyword only
                   </label>
                 </div>
+
+                {/* networkLayout / networkSort / colorBySentiment の state は存在するのに
+                    以前のリファクタで操作 UI が消えていた。ここで復元する。 */}
+                <Collapsible title="Layout & metrics" defaultOpen={false}>
+                  <div className="control-title">Layout</div>
+                  <div className="seg">
+                    {[['force', 'Default'], ['circle', 'Circle']].map(([v, l]) => (
+                      <button key={v} className={`seg-btn ${networkLayout === v ? 'on' : ''}`}
+                        onClick={() => setNetworkLayout(v)}>{l}</button>
+                    ))}
+                  </div>
+                  {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — node size / edge width / color follow the heatmap.</div>}
+                  <div className="control-title">Node size</div>
+                  <div className={`seg seg-stack ${netMirrorsHeatmap ? 'disabled' : ''}`}>
+                    {[['messages', 'Message count'], ['merger', 'Merger-related count'], ['sentiment', '|BERT sentiment|']].map(([v, l]) => (
+                      <button key={v} className={`seg-btn ${networkSort.nodeSize === v ? 'on' : ''}`} disabled={netMirrorsHeatmap}
+                        onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
+                    ))}
+                  </div>
+                  <div className="control-title">Edge width</div>
+                  <div className={`seg seg-stack ${netMirrorsHeatmap ? 'disabled' : ''}`}>
+                    {[['weight', 'Reply count'], ['merger', 'Merger-related count']].map(([v, l]) => (
+                      <button key={v} className={`seg-btn ${networkSort.edgeWeight === v ? 'on' : ''}`} disabled={netMirrorsHeatmap}
+                        onClick={() => setNetworkSort(s => ({ ...s, edgeWeight: v }))}>{l}</button>
+                    ))}
+                  </div>
+                  <label className={`check ${netMirrorsHeatmap ? 'disabled' : ''}`} style={{ marginTop: 6 }}>
+                    <input type="checkbox" checked={colorBySentiment} disabled={netMirrorsHeatmap}
+                      onChange={e => setColorBySentiment(e.target.checked)} />
+                    Color nodes by BERT sentiment
+                  </label>
+                </Collapsible>
 
                 <Collapsible title="Time range / sorting" defaultOpen={false}>
                   {netFollowsTimeline
@@ -1035,6 +1171,31 @@ function App() {
                   </div>
                 </div>
               </div>
+              {/* Follow timeline açıkken, network'ün üzerine mini playback HUD bindir:
+                  tam ekran network izlerken bile round / tarih / headline ve Play
+                  kontrolü görünür kalır (zaman akışı + graf gelişimi aynı anda). */}
+              <div className="net-vis-stack">
+                {netFollowsTimeline && timeline.length > 0 && (
+                  <div className="net-time-hud">
+                    <button className={`tl-play ${playing ? 'playing' : ''}`} onClick={togglePlay}
+                      title={playing ? 'Pause' : 'Play the crisis timeline'}>
+                      {playing ? <Pause size={13} /> : <Play size={13} />}
+                    </button>
+                    <input type="range" className="nth-range" min={0} max={timeline.length - 1} step={1}
+                      value={timelineIdx}
+                      onChange={e => setTimelineIdx(Math.max(Number(e.target.value), timelineStartIdx))}
+                      aria-label="timeline round (network HUD)" />
+                    <div className="nth-info">
+                      <span className="nth-round">
+                        Round {timelineStartIdx + 1}–{timelineIdx + 1} / {timeline.length}
+                        <span className="nth-date">{' '}· {fmtRoundLabel(timeline[timelineIdx]?.hour)}</span>
+                      </span>
+                      {timeline[timelineIdx]?.event_headline && (
+                        <span className="nth-headline">{timeline[timelineIdx].event_headline}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               <NetworkVisualization
                 data={displayNetwork}
                 layout={networkLayout}
@@ -1042,7 +1203,7 @@ function App() {
                 edgeMetric={netMirrorsHeatmap ? 'weight' : networkSort.edgeWeight}
                 colorBySentiment={netMirrorsHeatmap ? heatmapSort.key === 'sentiment' : colorBySentiment}
                 selectedNode={selectedNetworkNode}
-                onSelectNode={setSelectedNetworkNode}
+                onSelectNode={handleSelectNode}
                 selectedEdge={selectedEdge?.key}
                 onSelectEdge={selectEdge}
                 followingHeatmapSort={netMirrorsHeatmap}
@@ -1050,6 +1211,7 @@ function App() {
                 heatmapSortKey={heatmapSort.key}
                 heatmapSortDir={heatmapSort.dir}
               />
+              </div>
               {netMirrorsHeatmap && (
                 <div className="muted small net-follow-note">
                   Mirroring heatmap: filters mirrored · node size = {effectiveNetworkSize} ·
@@ -1061,6 +1223,21 @@ function App() {
                 <div className="muted small net-follow-note">
                   Following timeline: your network filters apply · time window = current crisis-timeline round range · press Play above to animate.
                 </div>
+              )}
+
+              {/* ---- Node Messages Panel: seçili node'un TÜM mesajları
+                   (broadcast/root dahil — edge tıklamasıyla erişilemeyenler) ---- */}
+              {selectedNetworkNode && selectedNetworkNode !== 'ajay' && (
+                <NodeMessagesPanel
+                  node={{ id: selectedNetworkNode, label: AGENTS[selectedNetworkNode]?.label || selectedNetworkNode }}
+                  messages={nodeMessages}
+                  collapsed={isNodeDetailCollapsed}
+                  setCollapsed={setIsNodeDetailCollapsed}
+                  selectedMessageId={selectedMessageId}
+                  contextStatus={contextStatus}
+                  onSelectMessage={selectMessage}
+                  onOpenFlow={() => setFlowOpen(true)}
+                />
               )}
 
               {/* ---- Edge Messages Panel (collapsible, directly under the network graph) ---- */}
@@ -1096,6 +1273,7 @@ function App() {
       <ConversationFlowModal
         open={flowOpen}
         context={messageContext}
+        status={contextStatus}
         selectedMessageId={selectedMessageId}
         onClose={() => setFlowOpen(false)}
         onSelectMessage={selectMessage}

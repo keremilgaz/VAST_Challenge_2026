@@ -3,11 +3,42 @@
 // ============================================
 // 23 round の slider + Play/Pause。選択した round までを全ビューに累積反映する。
 // 下のミニ強度バーは round ごとの merger 関連メッセージ密度を示す（危機の高まりが一目でわかる）。
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { fmtRoundLabel } from '../utils.js';
+import { EVENT_MARKERS } from '../constants.js';
 
 export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartIdx, playing, onTogglePlay, granularity, setGranularity }) {
+  const total = timeline ? timeline.length : 0;
+
+  // ---- Klavye kısayolları ----
+  //   ← / →            : bitiş round'unu geri/ileri al
+  //   Shift + ← / →    : başlangıç round'unu geri/ileri al
+  //   Space            : Play / Pause
+  // Bir input/textarea/select odaktayken (ör. keyword arama) devreye girmez.
+  useEffect(() => {
+    if (!total) return;
+    const onKeyDown = (e) => {
+      const t = e.target;
+      const tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (e.shiftKey) setStartIdx && setStartIdx(s => Math.min(s + 1, idx));
+        else setIdx(i => Math.min(i + 1, total - 1));
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (e.shiftKey) setStartIdx && setStartIdx(s => Math.max(s - 1, 0));
+        else setIdx(i => Math.max(i - 1, startIdx));
+      } else if (e.key === ' ') {
+        e.preventDefault(); // sayfanın scroll olmasını engelle
+        onTogglePlay && onTogglePlay();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [total, idx, startIdx, setIdx, setStartIdx, onTogglePlay]);
+
   if (!timeline || timeline.length === 0) return null;
   const cur = timeline[idx] || {};
   const startCur = timeline[startIdx] || {};
@@ -19,6 +50,18 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
 
   const onStart = (v) => { setStartIdx && setStartIdx(Math.min(Number(v), idx)); };
   const onEnd = (v) => { setIdx(Math.max(Number(v), startIdx)); };
+
+  // Olay işaretlerini (leak / embargo) round index'ine çevir:
+  // önce saat bazında tam eşleşme ara, yoksa marker'dan önceki son round'a düşür.
+  const markers = EVENT_MARKERS.map(mk => {
+    let mIdx = null;
+    for (let i = 0; i < n; i++) {
+      const h = timeline[i].hour || '';
+      if (h.slice(0, 13) === mk.time.slice(0, 13)) { mIdx = i; break; }
+      if (h <= mk.time) mIdx = i;
+    }
+    return { ...mk, idx: mIdx };
+  });
 
   // 選択範囲 [start, end] を 1 本のトラック上で塗る位置（%）
   const fillLeft = (startIdx / denom) * 100;
@@ -33,6 +76,12 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
         </button>
 
         <div className="tl-slider-wrap">
+          {/* olay işaretleri (leak / embargo): tick + track üzerinde dikey çizgi */}
+          {markers.map(mk => mk.idx != null && (
+            <div key={mk.id} className="tl-event-marker"
+              style={{ left: `${(mk.idx / denom) * 100}%`, background: mk.color }}
+              title={mk.label} />
+          ))}
           <div className="tl-ticks">
             {timeline.map((r, i) => {
               const inRange = i >= startIdx && i <= idx;
@@ -83,6 +132,14 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
         {cur.stock_price_value != null && <span className="tl-stock">${Number(cur.stock_price_value).toFixed(2)}</span>}
         {cur.market_sentiment && <span className="tl-sent">{cur.market_sentiment}</span>}
         <span className="tl-merger">{cur.merger_msgs || 0} merger-related · {cur.total_msgs || 0} msgs (end round)</span>
+        {markers.filter(mk => mk.idx != null).map(mk => (
+          <span key={mk.id} className="tl-event-key" style={{ color: mk.color }} title={mk.label}>
+            ▍{mk.short} {mk.time.slice(11, 16)}
+          </span>
+        ))}
+        <span className="tl-kbd-hint" title="Keyboard shortcuts: ←/→ step the end round · Shift+←/→ step the start round · Space play/pause">
+          ⌨ ←→ round · Shift+←→ start · Space play
+        </span>
       </div>
       {cur.event_headline && <div className="tl-headline">{cur.event_headline}</div>}
     </section>

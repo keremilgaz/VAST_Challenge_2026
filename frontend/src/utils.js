@@ -96,6 +96,12 @@ export function semanticCellColor(distance) {
   return { bg: `rgb(${r},${g},${b})`, opacity: t < 0.05 ? 0.7 : 1 };
 }
 
+// ISO zaman → heatmap/line chart bucket anahtarı (backend bucket_expression ile aynı kural)
+export function timeToBucket(time, granularity) {
+  if (!time) return '';
+  return granularity === 'daily' ? time.slice(0, 10) : time.slice(0, 13) + ':00:00';
+}
+
 // datetime-local input変換
 export function apiTimeToInputValue(value) {
   if (!value) return '';

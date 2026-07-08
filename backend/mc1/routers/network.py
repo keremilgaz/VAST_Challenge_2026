@@ -214,6 +214,76 @@ def edge_messages(
     )
 
 
+@router.get("/api/node-messages")
+def node_messages(
+    agent_id: str,
+    merger_only: bool = False,
+    message_types: Optional[list[str]] = Query(default=None),
+    message_type: str = "all",
+    text_sources: Optional[list[str]] = Query(default=None),
+    visibility: str = Query("all", pattern="^(all|internal|external)$"),
+    start_time: str = "",
+    end_time: str = "",
+    keyword: str = "",
+):
+    """
+    Network'te bir node'a tıklanınca, o agent'ın mevcut network filtresiyle
+    gönderdiği TÜM mesajları döner — reply graph'ta edge'e dönüşmeyen
+    broadcast / root mesajlar dahil (bunlar edge-messages'tan erişilemiyordu).
+    reply_kind / resolved_parent_id alanları sayesinde frontend non-reply
+    mesajları ayrıca işaretleyebilir. Filtre seti /api/network ile aynıdır,
+    böylece networkQuery olduğu gibi kullanılabilir.
+    """
+    selected_message_types = normalize_message_types(message_types, message_type)
+    selected_text_sources = normalize_text_sources(text_sources)
+    normalized_keyword = keyword.lower().strip()
+
+    query = f"""
+    MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
+    WHERE a.agent_id = $agent_id
+      {common_where_clause()}
+    WITH a, m, r, {keyword_score_expression()} AS keyword_score
+    RETURN m.message_id AS message_id,
+           m.comm_id AS comm_id,
+           m.timestamp_raw AS timestamp,
+           m.agent_id AS agent_id,
+           m.agent_role AS agent_role,
+           m.agent_label AS agent_label,
+           m.channel AS channel,
+           m.message_type AS message_type,
+           m.visibility AS visibility,
+           m.recipients AS recipients,
+           m.responding_to AS responding_to,
+           coalesce(m.resolved_parent_id, '') AS resolved_parent_id,
+           coalesce(m.reply_kind, '') AS reply_kind,
+           m.is_merger_related AS is_merger_related,
+           coalesce(m.internal_merger_related, false) AS internal_merger_related,
+           coalesce(m.internal_reacting_merger_related, false) AS internal_reacting_merger_related,
+           coalesce(m.internal_rationalizing_merger_related, false) AS internal_rationalizing_merger_related,
+           coalesce(m.internal_deliberating_merger_related, false) AS internal_deliberating_merger_related,
+           m.content AS content,
+           m.internal_reacting AS internal_reacting,
+           m.internal_rationalizing AS internal_rationalizing,
+           m.internal_deliberating AS internal_deliberating,
+           r.hour AS round_hour,
+           r.event_headline AS event_headline,
+           keyword_score AS keyword_score
+    ORDER BY timestamp
+    """
+    params = dict(
+        agent_id=agent_id,
+        merger_only=merger_only,
+        message_types=selected_message_types,
+        text_sources=selected_text_sources,
+        visibility=visibility,
+        start_time=start_time,
+        end_time=end_time,
+        keyword=normalized_keyword,
+    )
+    with get_driver().session() as session:
+        return [dict(r) for r in session.run(query, **params)]
+
+
 @router.get("/api/ajay-timeline")
 def ajay_timeline(
     merger_only: bool = False,

@@ -53,6 +53,28 @@ def options():
             )
         ]
 
+        # message_channel フィルタ用の (channel, message_type) の実在組み合わせ。
+        # 1つの channel が複数 message_type に割れる（comms_huddle→broadcast/action）ケースと、
+        # 1つの message_type が複数 channel に割れる（public_post→personal/official/anonymous）
+        # ケースの両方を、この複合キーで漏れなく表現する。key = channel + '|' + message_type。
+        channel_types = [
+            {
+                "channel": r["channel"],
+                "message_type": r["message_type"],
+                "count": r["count"],
+                "key": f'{r["channel"]}|{r["message_type"]}',
+            }
+            for r in session.run(
+                """
+                MATCH (m:Message)
+                RETURN m.channel AS channel,
+                       m.message_type AS message_type,
+                       count(*) AS count
+                ORDER BY channel, message_type
+                """
+            )
+        ]
+
         merger_count = session.run(
             "MATCH (m:Message {is_merger_related: true}) RETURN count(m) AS c"
         ).single()["c"]
@@ -102,6 +124,7 @@ def options():
         "message_types": message_types,
         "text_sources": TEXT_SOURCE_OPTIONS,
         "channels": channels,
+        "channel_types": channel_types,
         "visibilities": ["internal", "external"],
         "agents": agents,
         "merger_count": merger_count,

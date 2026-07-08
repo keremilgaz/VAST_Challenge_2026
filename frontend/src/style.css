@@ -192,6 +192,59 @@ summary { cursor: pointer; }
    ============================================ */
 .network-card .heatmap-title { align-items: baseline; }
 .net-wrap { position: relative; width: 100%; }
+/* ---- Follow timeline açıkken network üzerine bindirilen mini playback HUD ----
+   Amaç: tam ekran network izlerken zaman akışını (round / tarih / headline) ve
+   Play kontrolünü aynı anda görebilmek. */
+.net-vis-stack { position: relative; }
+.net-time-hud {
+  position: absolute; top: 10px; left: 10px; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(8,17,30,0.88); border: 1px solid #1f3050; border-radius: 10px;
+  padding: 7px 10px; max-width: 72%; backdrop-filter: blur(4px);
+}
+.net-time-hud .tl-play { padding: 5px 9px; }
+.nth-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nth-round { font-size: 11px; font-weight: 700; color: #d7e1ee; white-space: nowrap; }
+.nth-date { font-family: monospace; font-size: 11px; color: #8fb2d8; white-space: nowrap; }
+.nth-headline { font-size: 11px; color: #c9d6e6; font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
+.nth-range { width: 150px; accent-color: #22c55e; flex: none; }
+
+/* ---- yeni beliren edge pulse'ı (timeline play sırasında değişimi yakalamak için) ---- */
+@keyframes edgePulse {
+  0%, 100% { stroke-opacity: .18; }
+  50%      { stroke-opacity: 1; }
+}
+.net-edge.edge-new .edge-path { animation: edgePulse 1.1s ease-in-out 3; }
+.net-edge.edge-new .edge-glow { animation: edgePulse 1.1s ease-in-out 3; }
+.net-edge.edge-new .net-edge-lbl { opacity: 1; }
+
+/* ---- olay işaretleri (leak / embargo) ---- */
+.tl-slider-wrap .tl-event-marker {
+  position: absolute; top: -3px; bottom: 0; width: 2px; border-radius: 1px;
+  opacity: .9; pointer-events: none; z-index: 2;
+}
+.tl-event-key { font-size: 11px; font-weight: 700; white-space: nowrap; }
+.tl-kbd-hint { margin-left: auto; font-size: 10.5px; color: #6f86a6; white-space: nowrap; cursor: help; }
+.bucket-head.has-marker { color: #fff; box-shadow: inset 0 -2px 0 var(--mk-color, #e24b4a); }
+.mk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mk-color, #e24b4a); margin-left: 3px; vertical-align: middle; }
+.cell-marked { box-shadow: inset 2px 0 0 var(--mk-color, #e24b4a); }
+
+/* ---- heatmap satırı ↔ network node bağlantısı (brushing) ---- */
+.agent-label { cursor: pointer; transition: background .12s, color .12s; }
+.agent-label:hover { background: #16202e; color: #e8edf4; }
+.agent-label.row-selected {
+  background: #1c2b4a; color: #fff;
+  box-shadow: inset 0 0 0 1px #3a557f;
+}
+
+/* ---- non-reply (broadcast/root) mesaj chip'i ---- */
+.bc-chip {
+  display: inline-block; font-size: 10.5px; font-weight: 700; font-family: monospace;
+  color: #9fb2c8; border: 1px dashed #46587a; border-radius: 7px;
+  padding: 1px 7px; margin-bottom: 4px; cursor: help;
+}
 .net-svg { width: 100%; height: auto; background: #07101E; border: 1px solid #1A2840; border-radius: 12px; display: block; cursor: grab; }
 .net-svg:active { cursor: grabbing; }
 
@@ -409,6 +462,9 @@ summary { cursor: pointer; }
 .timeline-bar {
   background: #0c1422; border: 1px solid #1f3050; border-radius: 12px;
   padding: 11px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;
+  /* sayfa network'e kaydırılınca da timeline görünür kalsın (play + zaman akışı takibi) */
+  position: sticky; top: 8px; z-index: 40;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
 }
 .tl-row { display: flex; align-items: center; gap: 14px; }
 .tl-play {

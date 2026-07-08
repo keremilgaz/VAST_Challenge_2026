@@ -94,6 +94,13 @@ export default function NetworkVisualization({
   // timeline scrub等でdataが変わってeffectが再実行されても中身は消えない
   // （= 手動で組んだlayoutが time slider を動かすたびにリセットされるのを防ぐ）。
   const posRef = useRef({});
+  // selectedNode の最新値を保持する ref。メインの描画 effect は selectedNode を
+  // 依存に含めない（含めると選択のたびに全再描画され drag 位置が失われる）ため、
+  // mouseleave などのイベントハンドラは常にこの ref を読んで stale closure を避ける。
+  const selectedNodeRef = useRef(selectedNode);
+  selectedNodeRef.current = selectedNode;
+  // İlk render'da tüm edge'ler "yeni" olduğundan pulse'ı ilk çizimde tetiklemeyiz.
+  const firstDataRef = useRef(true);
 
   useEffect(() => {
     const nodes = (data?.nodes || []).map(n => ({ ...n }));
@@ -153,6 +160,31 @@ export default function NetworkVisualization({
       .map(e => ({ ...e, source: e.source, target: e.target, channel: e.channel || 'unknown', val: edgeValue(e) }))
       .filter(e => edgeMetric !== 'merger' || e.val > 0);
     const maxW = d3.max(links, e => e.val) || 1;
+
+    // ── mesajların ayrıştırılması: edge olarak görünen reply / partneri gizli reply / non-reply ──
+    // Badge = gönderilen toplam mesaj; edge = başka bir agent'ın mesajına yanıt.
+    // İki ayrı "görünmezlik" sebebi var ve ikisini karıştırmamak gerekir:
+    //   1. Mesaj gerçekten reply değil (broadcast/root)                     → ◌ chip
+    //   2. Mesaj reply AMA partner agent mevcut filtrede graftan düşmüş
+    //      (ör. merger-only'de hiç merger mesajı olmayan agent görünmez)    → ↩ chip
+    // Bu yüzden reply sayısını görünen link'lerden değil, backend'in döndürdüğü
+    // HAM edge listesinden (rawEdges) hesaplıyoruz.
+    const repliesVisibleBySource = {};
+    links.forEach(e => {
+      if (!e.inferred) repliesVisibleBySource[e.source] = (repliesVisibleBySource[e.source] || 0) + (e.weight || 0);
+    });
+    const repliesAllBySource = {};
+    rawEdges.forEach(e => {
+      if (!e.inferred) repliesAllBySource[e.source] = (repliesAllBySource[e.source] || 0) + (e.weight || 0);
+    });
+    nodes.forEach(n => {
+      if (n.inferred) { n.replies_sent = 0; n.hidden_replies = 0; n.broadcast_count = 0; return; }
+      const all = repliesAllBySource[n.id] || 0;
+      const vis = repliesVisibleBySource[n.id] || 0;
+      n.replies_sent = vis;                                            // edge olarak çizilen reply'lar
+      n.hidden_replies = Math.max(0, all - vis);                       // reply ama partner görünmüyor
+      n.broadcast_count = Math.max(0, (n.message_count || 0) - all);   // gerçek non-reply
+    });
 
     // ── 有向グラフ用の offset 計算 ──
     // 同じ「向き」(source>target) の channel 別 edge は、その向きの基準オフセット周りに扇状展開する。
@@ -245,6 +277,16 @@ export default function NetworkVisualization({
     edgeEnter.transition().duration(DUR).style('opacity', 1)
       .on('end', function () { d3.select(this).style('opacity', null); });
 
+    // ── "yeni beliren edge" pulse vurgusu ──
+    // Timeline Play sırasında büyüyen grafikte yeni edge'i gözle yakalamak zordur.
+    // İlk render hariç, bu güncellemede ilk kez ortaya çıkan edge'leri birkaç
+    // saniye pulse ettirip ağırlık etiketini de geçici olarak göster.
+    if (!firstDataRef.current && !edgeEnter.empty()) {
+      edgeEnter.classed('edge-new', true);
+      const entered = edgeEnter;
+      setTimeout(() => entered.classed('edge-new', false), 4000);
+    }
+
     // ── NODES ──
     const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
     const nodeFill = (d) => d.inferred ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0'));
@@ -267,6 +309,16 @@ export default function NetworkVisualization({
     nodeEnter.append('text').attr('class', 'n-label').attr('text-anchor', 'middle').attr('font-family', 'sans-serif').attr('font-size', 11).attr('font-weight', 600).attr('fill', '#cfe0f2').attr('pointer-events', 'none').attr('opacity', 0);
     nodeEnter.append('rect').attr('class', 'n-badge-rect').attr('rx', 6.5).attr('height', 13).attr('pointer-events', 'none');
     nodeEnter.append('text').attr('class', 'n-badge-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9).attr('fill', '#fff').attr('font-weight', 700).attr('pointer-events', 'none');
+    // "yanıt olmayan mesaj" chip'i (node'un sağ altı, kesikli çerçeve = edge'i olmayan mesajlar)
+    nodeEnter.append('rect').attr('class', 'n-bc-rect').attr('rx', 6.5).attr('height', 13)
+      .attr('fill', '#0b1626').attr('stroke-width', 1).attr('stroke-dasharray', '3 2').attr('pointer-events', 'none');
+    nodeEnter.append('text').attr('class', 'n-bc-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace')
+      .attr('font-size', 9).attr('font-weight', 700).attr('pointer-events', 'none');
+    // "partneri gizli reply" chip'i (node'un sol altı: reply var ama karşı agent filtreyle gizlenmiş)
+    nodeEnter.append('rect').attr('class', 'n-hr-rect').attr('rx', 6.5).attr('height', 13)
+      .attr('fill', '#0b1626').attr('stroke-width', 1).attr('stroke-dasharray', '3 2').attr('pointer-events', 'none');
+    nodeEnter.append('text').attr('class', 'n-hr-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace')
+      .attr('font-size', 9).attr('font-weight', 700).attr('pointer-events', 'none');
     nodeEnter.append('circle').attr('class', 'n-rank-bg').attr('r', 9).attr('fill', '#0b1626').attr('stroke-width', 1.5).attr('pointer-events', 'none');
     nodeEnter.append('text').attr('class', 'n-rank-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 800).attr('fill', '#dbe7f5').attr('pointer-events', 'none');
 
@@ -284,6 +336,16 @@ export default function NetworkVisualization({
     nodeSel.select('.n-label').filter(d => d.inferred).attr('opacity', 1);
     nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
     nodeSel.select('.n-badge-txt').text(d => d.message_count);
+    nodeSel.select('.n-bc-rect').attr('stroke', nodeStroke)
+      .style('display', d => d.broadcast_count > 0 ? null : 'none');
+    nodeSel.select('.n-bc-txt').attr('fill', nodeStroke)
+      .text(d => d.broadcast_count > 0 ? `◌${d.broadcast_count}` : '')
+      .style('display', d => d.broadcast_count > 0 ? null : 'none');
+    nodeSel.select('.n-hr-rect').attr('stroke', nodeStroke)
+      .style('display', d => d.hidden_replies > 0 ? null : 'none');
+    nodeSel.select('.n-hr-txt').attr('fill', nodeStroke)
+      .text(d => d.hidden_replies > 0 ? `↩${d.hidden_replies}` : '')
+      .style('display', d => d.hidden_replies > 0 ? null : 'none');
     nodeSel.select('.n-rank-bg').attr('stroke', nodeStroke).style('display', showRank ? null : 'none');
     nodeSel.select('.n-rank-txt').style('display', showRank ? null : 'none')
       .text(d => (showRank && rankById[d.id] != null) ? `#${rankById[d.id]}` : '');
@@ -297,7 +359,10 @@ export default function NetworkVisualization({
       .on('mouseenter', function (ev, n) {
         const a = AGENTS[n.id] || {};
         showTT(ev, `<div class="tt-name" style="color:${a.color || '#fff'}">${n.label}</div>
-          <div class="tt-row"><span class="tt-k">Messages</span><span class="tt-v">${n.message_count}</span></div>
+          <div class="tt-row"><span class="tt-k">Messages sent</span><span class="tt-v">${n.message_count}</span></div>
+          <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;replies shown as edges</span><span class="tt-v">${n.replies_sent ?? 0}</span></div>
+          <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u21a9 replies, partner hidden</span><span class="tt-v">${n.hidden_replies ?? 0}</span></div>
+          <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u25cc non-reply (broadcast/root)</span><span class="tt-v">${n.broadcast_count ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${n.merger_related_count}</span></div>
           <div class="tt-row"><span class="tt-k">BERT sentiment</span><span class="tt-v">${n.bert_sentiment_score == null ? '\u2014' : n.bert_sentiment_score.toFixed(2)}</span></div>`);
         highlightNode(n.id);
@@ -306,8 +371,11 @@ export default function NetworkVisualization({
       .on('mousemove', moveTT)
       .on('mouseleave', function (ev, d) {
         hideTT();
-        if (!selectedNode) clearHighlight(); else highlightNode(selectedNode);
-        if (d.id !== selectedNode && !d.inferred) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
+        // selectedNode を閉包から読むと stale になる（この effect は selectedNode 変更で
+        // 再実行されない）。ref から最新値を読む。
+        const selNow = selectedNodeRef.current;
+        if (!selNow) clearHighlight(); else highlightNode(selNow);
+        if (d.id !== selNow && !d.inferred) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
       });
     // 新規 node だけ fade in
     nodeEnter.transition().duration(DUR).style('opacity', 1)
@@ -363,6 +431,28 @@ export default function NetworkVisualization({
         const bw = String(d.message_count).length * 7 + 12;
         d3.select(this).attr('x', d.r - 2 + bw / 2).attr('y', -d.r + 2 + 1.5);
       });
+      // "yanıt olmayan mesaj" chip'i: node'un sağ altı (badge'in çaprazı)
+      nodeSel.select('.n-bc-rect').each(function (d) {
+        const t = `◌${d.broadcast_count}`;
+        const bw = t.length * 6.5 + 10;
+        d3.select(this).attr('width', bw).attr('x', d.r - 2).attr('y', d.r - 6);
+      });
+      nodeSel.select('.n-bc-txt').each(function (d) {
+        const t = `◌${d.broadcast_count}`;
+        const bw = t.length * 6.5 + 10;
+        d3.select(this).attr('x', d.r - 2 + bw / 2).attr('y', d.r + 4.5);
+      });
+      // "partneri gizli reply" chip'i: node'un sol altı
+      nodeSel.select('.n-hr-rect').each(function (d) {
+        const t = `↩${d.hidden_replies}`;
+        const bw = t.length * 6.5 + 10;
+        d3.select(this).attr('width', bw).attr('x', -(d.r - 2) - bw).attr('y', d.r - 6);
+      });
+      nodeSel.select('.n-hr-txt').each(function (d) {
+        const t = `↩${d.hidden_replies}`;
+        const bw = t.length * 6.5 + 10;
+        d3.select(this).attr('x', -(d.r - 2) - bw / 2).attr('y', d.r + 4.5);
+      });
       nodeSel.select('.n-abbr').attr('y', d => Math.max(9, Math.round(d.r * 0.56)) * 0.4);
       // rank chip を node の左上に配置（message-count badge は右上）
       nodeSel.select('.n-rank-bg').attr('cx', d => -d.r + 1).attr('cy', d => -d.r + 1);
@@ -382,16 +472,34 @@ export default function NetworkVisualization({
 
     if (selectedNode) highlightNode(selectedNode);
 
+    firstDataRef.current = false;
     return () => {};
   }, [data, layout, sizeMetric, edgeMetric, colorBySentiment, onSelectNode, onSelectEdge, followingHeatmapSort, heatmapOrder, heatmapSortKey, heatmapSortDir]);
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
-    svg.selectAll('g.net-node')
+    const nodeSel = svg.selectAll('g.net-node');
+    const edgeSel = svg.selectAll('g.net-edge');
+    nodeSel
       .classed('selected', d => d.id === selectedNode)
       .each(function (d) {
         d3.select(this).select('.n-label').attr('opacity', (d.inferred || d.id === selectedNode) ? 1 : 0);
       });
+    // 選択が変わったら dim/highlight も即時反映する。
+    // （以前は次の data 再描画までノード選択のハイライトが更新されないバグがあった）
+    if (selectedNode) {
+      const connected = new Set([selectedNode]);
+      (data?.edges || []).forEach(e => {
+        if (e.source === selectedNode) connected.add(e.target);
+        if (e.target === selectedNode) connected.add(e.source);
+      });
+      nodeSel.classed('dimmed', d => !connected.has(d.id));
+      edgeSel.classed('dimmed', e => !(e.source === selectedNode || e.target === selectedNode))
+        .classed('highlighted', e => e.source === selectedNode || e.target === selectedNode);
+    } else {
+      nodeSel.classed('dimmed', false);
+      edgeSel.classed('dimmed', false).classed('highlighted', false);
+    }
   }, [selectedNode, data]);
 
   // edge選択のハイライトだけを独立して更新（node effectと同じパターン）。
@@ -416,6 +524,9 @@ export default function NetworkVisualization({
       <div ref={tooltipRef} className="net-tt" style={{ display: 'none' }} />
       <div className="net-legend">
         <span className="nl-item nl-dir">▸ arrow = reply direction (sender → recipient)</span>
+        <span className="nl-item nl-dir" title="The solid badge (top-right) counts all messages the agent sent under the current filters. ◌ (bottom-right) = messages that are NOT replies (broadcasts / thread starters). ↩ (bottom-left) = messages that ARE replies, but whose partner agent is hidden by the current filters (e.g. merger-only hides agents with no matching messages), so the edge cannot be drawn.">
+          ● badge = msgs sent · ◌ = non-reply · ↩ = reply, partner hidden
+        </span>
         {legendChannels.length > 0 ? legendChannels.map(ch => (
           <span className="nl-item" key={ch}>
             <span className="nl-line" style={{ background: channelColor(ch) }} /> {channelLabel(ch)}

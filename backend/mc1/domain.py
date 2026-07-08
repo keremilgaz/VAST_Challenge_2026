@@ -229,7 +229,13 @@ def common_where_clause() -> str:
     """heatmap / messages 共通の WHERE 条件。"""
     return f"""
       {merger_filter_clause()}
-      AND (size($message_types) = 0 OR m.message_type IN $message_types)
+      AND (size($message_types) = 0
+           OR (coalesce(m.channel, '') + '|' + coalesce(m.message_type, '')) IN $message_types)
+      // ↑ filter は message_channel × message_type の複合キーで行う。
+      //   comms_huddle が broadcast/action に割れ、public_post が personal/official/anonymous
+      //   に割れる二重の重なりを、この複合キーで漏れなく（網羅的に）表現する。
+      //   互換のため wire 上の param 名は $message_types のままだが、中身は
+      //   "channel|message_type"（例: "comms_huddle|broadcast", "anonymous_post|public_post"）。
       AND (
           size($text_sources) = 0
           OR ('content' IN $text_sources AND coalesce(m.content, '') <> '')

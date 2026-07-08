@@ -162,6 +162,61 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
 }
 
 // ============================================
+// Network node click → Node Messages Panel
+// ============================================
+// Bir node seçilince o agent'ın (mevcut network filtresiyle) gönderdiği TÜM
+// mesajları gösterir — reply graph'ta edge'e dönüşmeyen broadcast / root
+// mesajlar dahil. Bu mesajlara daha önce chat panelinden erişilemiyordu.
+export function NodeMessagesPanel({ node, messages, collapsed, setCollapsed, selectedMessageId, contextStatus, onSelectMessage, onOpenFlow }) {
+  if (!node) return null;
+  const nonReply = messages.filter(m => !m.resolved_parent_id).length;
+  return (
+    <div className="detail-card">
+      <div className="detail-summary" onClick={() => setCollapsed(c => !c)}>
+        <button className="collapse-btn" aria-label="toggle">
+          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        </button>
+        <div className="ds-text">
+          <b>{node.label}</b> — all sent messages
+          <span className="ds-pipe">|</span> {messages.length} messages
+          {nonReply > 0 && <><span className="ds-pipe">|</span> ◌ {nonReply} non-reply (broadcast/root)</>}
+        </div>
+        <span className="ds-hint">{collapsed ? 'Expand messages' : 'Collapse'}</span>
+      </div>
+
+      {!collapsed && (
+        <div className="detail-body">
+          <h3>Messages ({messages.length})</h3>
+          <MessageList
+            messages={messages}
+            selectedMessageId={selectedMessageId}
+            onSelectMessage={onSelectMessage}
+            renderExtra={(m) => !m.resolved_parent_id ? (
+              <span className="bc-chip" title="This message is not a reply to another agent — a broadcast to ALL or a thread-starting post. It has no edge in the reply graph.">
+                ◌ non-reply (broadcast/root)
+              </span>
+            ) : null}
+          />
+
+          {selectedMessageId && (
+            <div className="ctx-hint">
+              <span className="muted">
+                {contextStatus === 'loading' ? 'Loading related messages…'
+                  : contextStatus === 'error' ? 'Could not load related messages.'
+                  : 'Related messages open in a chat popup.'}
+              </span>
+              <button className="flow-btn" onClick={(e) => { e.stopPropagation(); onOpenFlow && onOpenFlow(); }}>
+                Open conversation
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
 // Related Messages / Context (新規)
 // ============================================
 export function RelatedMessages({ status, context, selectedMessageId, onSelectMessage, onOpenFlow }) {
@@ -248,8 +303,13 @@ const KIND_TAG = {
   root: { label: 'thread start', color: '#7f93ad' },
 };
 
-export function ConversationFlowModal({ open, context, selectedMessageId, onClose, onSelectMessage }) {
+export function ConversationFlowModal({ open, context, status, selectedMessageId, onClose, onSelectMessage }) {
   if (!open) return null;
+
+  // 別のmessageを読み込んでいる間、前のmessageのスレッドが表示されたままになる
+  // バグがあったので、loading/error 中は古い context を描画しない。
+  const loading = status === 'loading';
+  const errored = status === 'error';
 
   // 解決済みスレッド全体（祖先 → 選択 message → 返信）を時系列で表示する。
   // 親リンクは responding_to(message-id / @role) + recipients から解決済み。
@@ -305,13 +365,20 @@ export function ConversationFlowModal({ open, context, selectedMessageId, onClos
           <button className="flow-close" onClick={onClose}>✕</button>
         </div>
 
-        {why && <div className="flow-why"><b>Why this matters:</b> {why}</div>}
+        {!loading && !errored && why && <div className="flow-why"><b>Why this matters:</b> {why}</div>}
 
-        {(!context || !context.found) && (
+        {loading && (
+          <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Loading conversation…</p>
+        )}
+        {errored && (
+          <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Could not load this conversation (is the backend running?).</p>
+        )}
+
+        {!loading && !errored && (!context || !context.found) && (
           <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>No message selected.</p>
         )}
 
-        {context && context.found && thread.length <= 1 && (
+        {!loading && !errored && context && context.found && thread.length <= 1 && (
           <p className="muted" style={{ padding: '8px 16px' }}>
             This message starts a thread on its own — nothing replies to it and it
             isn’t addressed to an earlier speaker.
@@ -319,7 +386,7 @@ export function ConversationFlowModal({ open, context, selectedMessageId, onClos
         )}
 
         <div className="flow-list">
-          {thread.map(item => renderBubble(item))}
+          {!loading && !errored && thread.map(item => renderBubble(item))}
         </div>
       </div>
     </div>

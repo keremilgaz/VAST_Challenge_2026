@@ -45,6 +45,12 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+    # src'yi mount et: host'taki kod değişiklikleri rebuild gerekmeden
+    # container içindeki vite dev sunucusuna (hot reload) anında yansır.
+    # ./frontend'in tamamını mount etme (node_modules gölgelenir).
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
 
 volumes:
   neo4j_data:
