@@ -44,3 +44,102 @@ export const EVENT_MARKERS = [
   { id: 'leak',    time: '2046-06-05T17:00:00', short: 'leak',    label: 'Leak: embargoed info appears on FleX (~17:00)', color: '#e24b4a' },
   { id: 'embargo', time: '2046-06-05T18:00:00', short: 'embargo', label: 'Embargo lifts (June 5, 18:00)',                 color: '#f59e0b' },
 ];
+
+// ============================================
+// Sequential flow visualization (heatmap の上に重ねる横時系列)
+// ============================================
+// リリースが embargo enforcement をすり抜けるまでの代表イベントを DAG として描く。
+//   - 各 event は node（time で x を heatmap に合わせる）。
+//   - 因果は SEQ_EDGES で結ぶ（type='direct' 実線 / 'enabling' 破線=監視の死角）。
+//   - node クリックで detail（英語1文）＋ related message を表示。
+// node の kind（下の SEQ_KINDS）で色分けする。
+export const SEQ_KINDS = {
+  decision: { color: '#f59e0b', label: 'Decision' },              // 意思決定
+  enabling: { color: '#a78bfa', label: 'Enabling condition' },    // イネーブリング条件
+  external: { color: '#22d3ee', label: 'External trigger' },      // 外部トリガー
+  internal: { color: '#e24b4a', label: 'Internal deviation' },    // 内部逸脱
+  result:   { color: '#4ade80', label: 'Result / recognition' },  // 結果 / 認識
+};
+
+// order = ユーザの論理的な問題番号（時系列順ではない）。time が heatmap 上の x を決める。
+export const SEQ_EVENTS = [
+  {
+    order: 1, id: 'ajay_brief', time: '2046-05-25T09:00:00',
+    title: 'Ajay merger brief', kind: 'decision',
+    detail: 'CEO Ajay privately briefs the senior team on the CivicLoom merger (capital infusion + governance rebrand). This creates the embargo: material non-public information that a small group must now hold in secret.',
+    related: ['20460525_06_002', '20460525_06_001'],
+  },
+  {
+    order: 2, id: 'judge_assigned', time: '2046-05-30T09:00:00',
+    title: 'Judge assigned', kind: 'enabling',
+    detail: 'A Judge / compliance monitor is assigned to enforce the embargo. Crucially it only sits in comms_huddle — side_huddle, 1-on-1, personal and anonymous posts stay unmonitored. This blind spot is what later lets a post pass enforcement.',
+    related: ['20460530_09_009', '20460530_09_004'],
+  },
+  {
+    order: 3, id: 'elena_faux_pas', time: '2046-05-29T09:00:00',
+    title: '@Elena faux pas', kind: 'internal',
+    detail: 'Social-Manager tags @ElenaMarquez (CivicLoom CEO) in a personal post with "big things coming"; a CivicLoom account likes it before deletion. The first near-miss that signals the counterparty externally — and the reason the Judge is installed.',
+    related: ['20460529_08_012', '20460529_08_013', '20460529_08_017'],
+  },
+  {
+    order: 4, id: 'nhpi_report', time: '2046-05-22T09:00:00',
+    title: 'NHPI report', kind: 'external',
+    detail: 'NHPI publishes a report on algorithmic tools in housing; its three concern categories map directly onto TenantThread\'s Analytics Suite. Legal reads it as "someone gave them a product overview" — external pressure that draws reporters toward the company.',
+    related: ['20460522_03_002'],
+  },
+  {
+    order: 5, id: 'saltwind', time: '2046-05-31T09:00:00',
+    title: 'SaltWind #1 / #2', kind: 'external',
+    detail: 'SaltWind runs Piece #1 (data-broker partnerships) then Piece #2 (re-identification), naming the three internal scores accurately. This confirms a reporter has an internal source and puts the company on the defensive.',
+    related: ['20460531_10_010', '20460604_12_003', '20460604_12_004', '20460604_12_007'],
+  },
+  {
+    order: 6, id: 'slack_leak', time: '2046-06-05T11:00:00',
+    title: 'Slack leak', kind: 'internal',
+    detail: 'Employee Slack ("the merger saves all our jobs") leaks to Said-it within ~20 minutes. Legal flags it as an internal-source breach; bilateral confidentiality is now compromised by TenantThread\'s own side.',
+    related: ['20460605_15_048', '20460605_15_045', '20460605_15_030'],
+  },
+  {
+    order: 7, id: 'intern_overheard', time: '2046-06-05T10:00:00',
+    title: 'Intern overheard', kind: 'internal',
+    detail: 'An un-briefed intern repeats a "CivicLoom timeline at 6 PM" comment overheard near the kitchen. Confidential timing now circulates among staff without clearance, through hallway/1-on-1 channels the Judge never sees.',
+    related: ['20460605_14_001', '20460605_14_020', '20460605_14_008'],
+  },
+  {
+    order: 8, id: 'anon_6pm', time: '2046-06-05T13:00:00',
+    title: 'Anon #6PM post', kind: 'result',
+    detail: 'An anonymous #CivicLoom #6PM post appears — counterparty AND timing now public, through an unmonitored anonymous channel the Judge cannot police. This is the release that passes embargo enforcement.',
+    related: ['20460605_17_006', '20460605_17_024', '20460605_17_013'],
+  },
+  {
+    order: 9, id: 'mosaic', time: '2046-06-05T14:00:00',
+    title: 'Mosaic complete', kind: 'result',
+    detail: 'Platform-Trust / Social-Manager declare the information mosaic "functionally complete": only the counterparty name and deal terms were ever secret, and the market can now infer 80%+ of it from public signals alone.',
+    related: ['20460605_18_026', '20460605_17_005', '20460605_15_049'],
+  },
+];
+
+// 因果エッジ（DAG）。type: 'direct' = 実線 / 'enabling' = 破線（監視の死角がリリースを許した経路）。
+export const SEQ_EDGES = [
+  { from: 'ajay_brief',       to: 'elena_faux_pas', type: 'direct' },
+  { from: 'elena_faux_pas',   to: 'judge_assigned', type: 'direct' },
+  { from: 'judge_assigned',   to: 'anon_6pm',       type: 'enabling' },
+  { from: 'nhpi_report',      to: 'saltwind',       type: 'direct' },
+  { from: 'intern_overheard', to: 'anon_6pm',       type: 'direct' },
+  { from: 'saltwind',         to: 'mosaic',         type: 'direct' },
+  { from: 'slack_leak',       to: 'mosaic',         type: 'direct' },
+  { from: 'anon_6pm',         to: 'mosaic',         type: 'direct' },
+];
+
+// message_id → その message が「決定的に関連する」event 群。
+// heatmap / network 側の MessageList はこれを見て "event related message" ラベルを付ける。
+export const EVENT_RELATED_BY_MESSAGE_ID = (() => {
+  const map = new Map();
+  for (const ev of SEQ_EVENTS) {
+    for (const mid of (ev.related || [])) {
+      if (!map.has(mid)) map.set(mid, []);
+      map.get(mid).push({ id: ev.id, order: ev.order, title: ev.title });
+    }
+  }
+  return map;
+})();

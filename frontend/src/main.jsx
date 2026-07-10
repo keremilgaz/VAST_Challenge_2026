@@ -27,6 +27,8 @@ import {
 import { Collapsible } from './components/Collapsible.jsx';
 import { CrisisTimeline } from './components/CrisisTimeline.jsx';
 import { StockSentimentLineChart } from './components/StockSentimentLineChart.jsx';
+import { SequentialFlow } from './components/SequentialFlow.jsx';
+import { SEQ_EVENTS } from './constants.js';
 import {
   MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal, AjayTimelineModal,
 } from './components/messagePanels.jsx';
@@ -89,6 +91,7 @@ function App() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showLineChart, setShowLineChart] = useState(true);
   const [showNetwork, setShowNetwork] = useState(true);
+  const [showSeqFlow, setShowSeqFlow] = useState(true); // heatmap 上の sequential flow
   // side-by-side（karşılaştırma）: heatmap と network を横並びにして同時に見る。
   // この modda detaylı filtre panelleri ve line chart 非表示（üst sıra temiz karşılaştırma）。
   const [sideBySide, setSideBySide] = useState(false);
@@ -96,6 +99,8 @@ function App() {
   // side-by-side modunda filtre panellerini ve line chart'ı gizle（layout için türetilmiş）。
   const effFiltersOpen = filtersOpen && !sideBySide;
   const effShowLineChart = showLineChart && !sideBySide;
+  // side-by-side のときは line chart 同様、sequential flow も隠す。
+  const effShowSeqFlow = showSeqFlow && !sideBySide;
   const [showBertSentimentLine, setShowBertSentimentLine] = useState(true);
 
   // ---- crisis timeline slider (CrisisNet風: round N まで累積表示) ----
@@ -126,6 +131,11 @@ function App() {
   const [messageContext, setMessageContext] = useState(null);
   const [contextStatus, setContextStatus] = useState(''); // '', 'loading', 'error'
   const [flowOpen, setFlowOpen] = useState(false); // Conversation Flow modal
+
+  // ---- sequential flow: 選択中 event と、その「event related messages」 ----
+  const [seqEventId, setSeqEventId] = useState(null);
+  const [seqEventMessages, setSeqEventMessages] = useState([]);
+  const [seqMsgStatus, setSeqMsgStatus] = useState(''); // '', 'loading', 'error'
 
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -457,20 +467,25 @@ function App() {
   // ============================================
   // Heatmap と Line Chart の横スクロール同期
   // ============================================
-  // 両者は同じ inner width（LABEL_COL + buckets * cell.w）なので scrollLeft を
-  // そのままミラーすれば time 軸が常に一致する。guard で echo ループを防ぐ。
+  // heatmap / line chart / sequential flow は同じ inner width（LABEL_COL + buckets * cell.w）
+  // なので、あるペインの scrollLeft を他の全ペインにミラーすれば time 軸が常に一致する。
+  // guard で echo ループを防ぐ。（3ペインに拡張。sequential flow も heatmap と連動する。）
   const heatmapScrollRef = useRef(null);
   const lineScrollRef = useRef(null);
+  const seqScrollRef = useRef(null);
   const scrollGuardRef = useRef(false);
-  const mirrorScroll = (src, dst) => {
-    if (scrollGuardRef.current || !src || !dst) return;
-    if (dst.scrollLeft === src.scrollLeft) return;
+  const syncScroll = (srcEl) => {
+    if (scrollGuardRef.current || !srcEl) return;
+    const panes = [heatmapScrollRef.current, lineScrollRef.current, seqScrollRef.current];
     scrollGuardRef.current = true;
-    dst.scrollLeft = src.scrollLeft;
+    for (const el of panes) {
+      if (el && el !== srcEl && el.scrollLeft !== srcEl.scrollLeft) el.scrollLeft = srcEl.scrollLeft;
+    }
     requestAnimationFrame(() => { scrollGuardRef.current = false; });
   };
-  const handleHeatmapScroll = () => mirrorScroll(heatmapScrollRef.current, lineScrollRef.current);
-  const handleLineScroll = () => mirrorScroll(lineScrollRef.current, heatmapScrollRef.current);
+  const handleHeatmapScroll = () => syncScroll(heatmapScrollRef.current);
+  const handleLineScroll = () => syncScroll(lineScrollRef.current);
+  const handleSeqScroll = () => syncScroll(seqScrollRef.current);
 
   // network専用 filter の toggle / helper（heatmapには影響しない）
   const toggleNetCombo = (t) => toggleInSet(setNetCombos, allComboKeys, t);
@@ -623,6 +638,34 @@ function App() {
     }
   }
 
+  // sequential flow: node クリックで event を選択（同じ node 再クリックで解除）。
+  const handleSelectSeqEvent = useCallback((id) => {
+    setSeqEventId(cur => (cur === id ? null : id));
+  }, []);
+
+  // 選択中 event の「決定的に関連する message」を id 指定でまとめて取得（順序保持）。
+  useEffect(() => {
+    if (!seqEventId) { setSeqEventMessages([]); setSeqMsgStatus(''); return; }
+    const ev = SEQ_EVENTS.find(e => e.id === seqEventId);
+    const ids = (ev && ev.related) || [];
+    if (!ids.length) { setSeqEventMessages([]); setSeqMsgStatus(''); return; }
+    let cancelled = false;
+    setSeqMsgStatus('loading');
+    (async () => {
+      try {
+        const p = new URLSearchParams();
+        ids.forEach(i => p.append('ids', i));
+        const res = await fetch(`${API}/api/messages-by-ids?${p.toString()}`);
+        if (!res.ok) throw new Error(`messages-by-ids ${res.status}`);
+        const rows = await res.json();
+        if (!cancelled) { setSeqEventMessages(rows); setSeqMsgStatus(''); }
+      } catch (e) {
+        if (!cancelled) { setSeqEventMessages([]); setSeqMsgStatus('error'); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [seqEventId]);
+
   // close / far keyword クリック → 既存keyword searchを再利用
   const onKeywordClick = (kw) => {
     setSearchKeyword(kw);
@@ -694,6 +737,7 @@ function App() {
           ============================================ */}
       <section className="global-controls">
         <span className="gc-label">Show visualizations:</span>
+        <label className="check"><input type="checkbox" checked={showSeqFlow} onChange={e => setShowSeqFlow(e.target.checked)} disabled={sideBySide} /> Event flow</label>
         <label className="check"><input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} /> Heatmap</label>
         <label className="check"><input type="checkbox" checked={showLineChart} onChange={e => setShowLineChart(e.target.checked)} /> Line Chart</label>
         <label className="check"><input type="checkbox" checked={showNetwork} onChange={e => setShowNetwork(e.target.checked)} /> Network</label>
@@ -740,7 +784,7 @@ function App() {
       {/* ============================================
           HEATMAP SECTION : filter(左) | heatmap+detail+linechart(右)
           ============================================ */}
-      {(showHeatmap || effShowLineChart) && (
+      {(showHeatmap || effShowLineChart || effShowSeqFlow) && (
         <section className={`section heatmap-section ${effFiltersOpen ? '' : 'filters-hidden'}`}>
           {/* ---- left: heatmap filter panel (collapsed 時は描画しない=全幅) ---- */}
           {effFiltersOpen && (
@@ -890,8 +934,23 @@ function App() {
           </aside>
           )}
 
-          {/* ---- right: heatmap + detail + line chart ---- */}
+          {/* ---- right: sequential flow (heatmap の上) + heatmap + detail + line chart ---- */}
           <div className="viz-col">
+            {/* ---- Sequential flow（heatmap の x 軸に合わせた横時系列。スクロール連動） ---- */}
+            {effShowSeqFlow && (
+              <SequentialFlow
+                granularity={granularity}
+                buckets={buckets}
+                scrollRef={seqScrollRef}
+                onScroll={handleSeqScroll}
+                selectedEventId={seqEventId}
+                onSelectEvent={handleSelectSeqEvent}
+                eventMessages={seqEventMessages}
+                eventMessagesStatus={seqMsgStatus}
+                selectedMessageId={selectedMessageId}
+                onSelectMessage={selectMessage}
+              />
+            )}
             {showHeatmap && (
             <div className="heatmap-card">
               <div className="heatmap-title">

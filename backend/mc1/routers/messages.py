@@ -67,6 +67,24 @@ def message_context(message_id: str):
     return ctx
 
 
+@router.get("/api/messages-by-ids")
+def messages_by_ids(ids: Optional[list[str]] = Query(default=None)):
+    """
+    指定した message_id 群の完全な message 行を、リクエスト順のまま返す。
+    Sequential-flow の各イベントの「event related messages」表示に使う。
+    - 既存の fetch_all_messages_for_context() を再利用（912件程度なので全件取得で十分）。
+    - 存在しない id は黙って除外し、shape は /api/messages と互換のフィールドで返す。
+    """
+    if not ids:
+        return []
+    try:
+        all_msgs = fetch_all_messages_for_context()
+    except Exception:
+        return []
+    by_id = {m["message_id"]: m for m in all_msgs}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 @router.get("/api/keywords")
 def keywords(
     agent_id: str,
