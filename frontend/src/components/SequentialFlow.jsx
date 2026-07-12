@@ -245,26 +245,55 @@ export function SequentialFlow({
             })}
           </g>
 
-          {/* ラベルは hover(なければ selected) の1つだけ、最前面に描く */}
+          {/* ラベル: hover(なければ selected) の node と、因果で直接つながる node を同時に表示。
+              つながり先の名前も読めるので「どこからどこへ」が追える。
+              ラベル同士は当たり判定で上下に逃がして重ならないようにする。 */}
           {(() => {
-            const labelId = hoveredId || selectedEventId;
-            if (!labelId) return null;
-            const p = posById.get(labelId);
-            if (!p) return null;
-            const y = nodeY(p);
-            const text = p.title;
-            const w = Math.max(40, text.length * 6.2 + 14);
+            const focusId = hoveredId || selectedEventId;
+            if (!focusId) return null;
+            const ids = new Set([focusId]);
+            for (const a of arcs) {
+              if (a.from === focusId) ids.add(a.to);
+              if (a.to === focusId) ids.add(a.from);
+            }
             const rightEdge = LABEL_COL + plotW + rightPad;
-            let bx = p.x - w / 2;
-            if (bx + w > rightEdge) bx = rightEdge - w;
-            if (bx < 2) bx = 2;
-            // 既定はノード上側。上に余白が無ければ下側に出す。
-            const above = y - R - 24;
-            const by = above >= 2 ? above : (y + R + 6);
+            const drawn = [];
+            const boxes = [];
+            // focus を先に配置（最優先の位置を取らせる）
+            const order = [focusId, ...[...ids].filter(i => i !== focusId)];
+            for (const id of order) {
+              const p = posById.get(id);
+              if (!p) continue;
+              const isFocus = id === focusId;
+              const y = nodeY(p);
+              const w = Math.max(40, p.title.length * 6.2 + 14);
+              let bx = p.x - w / 2;
+              if (bx + w > rightEdge) bx = rightEdge - w;
+              if (bx < 2) bx = 2;
+              // 上 → 下 → さらに上 → さらに下 の順で空きを探す
+              const cands = [y - R - 24, y + R + 6, y - R - 46, y + R + 28, y - R - 68];
+              let by = cands[0];
+              for (const c of cands) {
+                if (c < 2) continue;
+                const hit = drawn.some(d =>
+                  !(bx + w < d.x || bx > d.x + d.w || c + 20 < d.y || c > d.y + 20));
+                if (!hit) { by = c; break; }
+              }
+              drawn.push({ x: bx, y: by, w });
+              boxes.push({ id, bx, by, w, title: p.title, isFocus });
+            }
             return (
               <g pointerEvents="none">
-                <rect x={bx} y={by} width={w} height={20} rx={5} fill="#0b1622" stroke="#3b4d68" strokeWidth="1" opacity="0.97" />
-                <text x={bx + w / 2} y={by + 14} textAnchor="middle" fontSize="11" fill="#e5edf7">{text}</text>
+                {boxes.map(b => (
+                  <g key={b.id}>
+                    <rect x={b.bx} y={b.by} width={b.w} height={20} rx={5}
+                      fill="#0b1622" stroke={b.isFocus ? '#7d93ad' : '#3b4d68'}
+                      strokeWidth="1" opacity={b.isFocus ? 0.98 : 0.92} />
+                    <text x={b.bx + b.w / 2} y={b.by + 14} textAnchor="middle" fontSize="11"
+                      fill={b.isFocus ? '#e5edf7' : '#a8b8cc'}
+                      fontWeight={b.isFocus ? '700' : '400'}>{b.title}</text>
+                  </g>
+                ))}
               </g>
             );
           })()}

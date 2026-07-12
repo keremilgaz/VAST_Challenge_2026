@@ -57,12 +57,20 @@ export const EVENT_MARKERS = [
 //   - 因果は SEQ_EDGES で結ぶ（type='direct' 実線 / 'enabling' 破線=監視の死角）。
 //   - node クリックで detail（英語1文）＋ related message を表示。
 // node の kind（下の SEQ_KINDS）で色分けする。
+// Sequential flow の node 色。
+// 【配色ルール】他の可視化で「意味」が確定している色は避ける:
+//   #22d3ee = 株価(line chart) / #f59e0b = market sentiment(line chart)
+//   #4ade80 = positive sentiment(network) / #e24b4a = negative sentiment・leak marker
+// → sequential flow は上記と混同しない色域（マゼンタ〜紫〜ピンク〜グレー系）に寄せる。
+//   result は「情報漏洩が完成した」という悪い結果なので、緑（成功の含意）ではなく
+//   深いマゼンタにして深刻さを表す。
 export const SEQ_KINDS = {
-  decision: { color: '#f59e0b', label: 'Decision' },              // 意思決定
-  enabling: { color: '#a78bfa', label: 'Enabling condition' },    // イネーブリング条件
-  external: { color: '#22d3ee', label: 'External trigger' },      // 外部トリガー
-  internal: { color: '#e24b4a', label: 'Internal deviation' },    // 内部逸脱
-  result:   { color: '#4ade80', label: 'Result / recognition' },  // 結果 / 認識
+  decision: { color: '#c084fc', label: 'Decision' },              // 意思決定（紫）
+  enabling: { color: '#7dd3fc', label: 'Enabling condition' },    // イネーブリング条件（淡い青）
+  external: { color: '#5eead4', label: 'External trigger' },      // 外部トリガー（ティール）
+  internal: { color: '#fb7185', label: 'Internal deviation' },    // 内部逸脱（ローズ）
+  gap:      { color: '#94a3b8', label: 'Inaction / gap' },        // 不作為（グレー）
+  result:   { color: '#e879f9', label: 'Result / recognition' },  // 結果（マゼンタ）
 };
 
 // order = ユーザの論理的な問題番号（時系列順ではない）。time が heatmap 上の x を決める。
@@ -148,6 +156,15 @@ export const SEQ_EVENTS = [
     detail: '5:00 PM. SaltWind publishes "EXCLUSIVE: TenantThread and CivicLoom in Advanced Merger Talks," sourced to third parties. Legal uses this third-party publication (not "our breach") as the basis to accelerate the embargo lift.',
     related: ['20460605_21_002', '20460605_21_004'],
   },
+  {
+    // Platform-Trust が crisis 当日の朝、comms_huddle で3時間沈黙した。
+    // 本来 Platform-Trust しか出せない技術的訂正（再識別リスク）が止まり、
+    // Legal が代筆する羽目になった。本人も R16 で "too quiet" と自認している。
+    order: 15, id: 'pt_silence', time: '2046-06-05T09:00:00',
+    title: 'Platform-Trust silent 3h', kind: 'gap',
+    detail: 'Through the first three hours of crisis morning, Platform-Trust posts nothing in the Comms Huddle. Legal calls on them repeatedly ("you are the bottleneck", "15 minutes overdue") because only they can supply the factual correction on re-identification. Legal ends up drafting that correction from product docs instead. Platform-Trust later admits being "too quiet while my platform gets destroyed by a false narrative."',
+    related: ['20460605_13_029', '20460605_13_044', '20460605_13_050', '20460605_16_002'],
+  },
 ];
 
 // 因果エッジ（DAG）。type: 'direct' = 実線 / 'enabling' = 破線（監視の死角がリリースを許した経路）。
@@ -171,6 +188,11 @@ export const SEQ_EDGES = [
   { from: 'saltwind_expose',  to: 'mosaic',           type: 'direct' },
   { from: 'saltwind_false',   to: 'mosaic',           type: 'direct' },
   { from: 'anon_6pm',         to: 'saltwind_confirm', type: 'direct' },
+  // Platform-Trust の沈黙: exposé が技術的訂正を要求した → 3時間応答が無かった →
+  // 訂正が不在のまま false narrative が固まり、mosaic を加速した（後2本は enabling）。
+  { from: 'saltwind_expose',  to: 'pt_silence',       type: 'direct' },
+  { from: 'pt_silence',       to: 'saltwind_false',   type: 'enabling' },
+  { from: 'pt_silence',       to: 'mosaic',           type: 'enabling' },
 ];
 
 // message_id → その message が「決定的に関連する」event 群。
@@ -180,7 +202,7 @@ export const EVENT_RELATED_BY_MESSAGE_ID = (() => {
   for (const ev of SEQ_EVENTS) {
     for (const mid of (ev.related || [])) {
       if (!map.has(mid)) map.set(mid, []);
-      map.get(mid).push({ id: ev.id, order: ev.order, title: ev.title });
+      map.get(mid).push({ id: ev.id, order: ev.order, title: ev.title, kind: ev.kind });
     }
   }
   return map;

@@ -169,7 +169,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .msg-meta .merger, .chips .merger { background: #3b2f12; border-color: #8a6418; color: #fde68a; }
 .msg-meta .internal-merger { background: #1e2f23; border-color: #40784b; color: #bbf7d0; }
 .msg-meta .keyword-score { background: #172554; border-color: #3b82f6; color: #bfdbfe; }
-.msg-meta .event-related { background: #2a1e3d; border-color: #7c3aed; color: #ddd0ff; font-weight: 700; }
+.msg-meta .event-related { background: #0f1620; font-weight: 700; }
 .kw-help {
   display: inline-flex; align-items: center; justify-content: center;
   width: 15px; height: 15px; margin-left: 5px; border-radius: 50%;

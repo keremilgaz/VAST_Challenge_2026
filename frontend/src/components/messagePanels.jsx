@@ -6,7 +6,7 @@
 import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatRecipients } from '../utils.js';
-import { EVENT_RELATED_BY_MESSAGE_ID } from '../constants.js';
+import { EVENT_RELATED_BY_MESSAGE_ID, SEQ_KINDS } from '../constants.js';
 import { messageNumber } from '../commIdMap.js';
 import { AGENTS } from '../network.jsx';
 
@@ -101,12 +101,17 @@ export function MessageList({ messages, selectedMessageId, onSelectMessage, rend
         {m.keyword_score > 0 && <span className="keyword-score">keyword score: {m.keyword_score}</span>}
         {m.is_merger_related && <span className="merger">content merger-related</span>}
         {m.internal_merger_related && <span className="internal-merger">internal merger-related</span>}
-        {EVENT_RELATED_BY_MESSAGE_ID.has(m.message_id) && (
-          <span className="event-related"
-            title={`Event related message · ${EVENT_RELATED_BY_MESSAGE_ID.get(m.message_id).map(e => `#${e.order} ${e.title}`).join(', ')}`}>
-            ★ event related message
-          </span>
-        )}
+        {EVENT_RELATED_BY_MESSAGE_ID.has(m.message_id) &&
+          EVENT_RELATED_BY_MESSAGE_ID.get(m.message_id).map(ev => {
+            const kind = SEQ_KINDS[ev.kind] || SEQ_KINDS.decision;
+            return (
+              <span key={ev.id} className="event-related"
+                style={{ borderColor: kind.color, color: kind.color }}
+                title={`Event related message · ${ev.title} (${kind.label})`}>
+                event_related · {kind.label}
+              </span>
+            );
+          })}
       </div>
       <div className="sub-meta">
         Role: {m.agent_role || '-'} / Recipients: {formatRecipients(m.recipients)} / Responding to: {(() => {
