@@ -8,9 +8,9 @@
 //   - 弧は「同じ tier に x が重なる弧を置かない」貪欲割り当てで重ならないようにする。
 //   - node クリックで detail（英語1文）＋ 決定的に関連する message 一覧を出す。
 //     message 一覧は既存 MessageList を再利用するので "event related message" ラベルも付く。
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { CELL, LABEL_COL, SEQ_EVENTS, SEQ_EDGES, SEQ_KINDS } from '../constants.js';
-import { timeToBucket } from '../utils.js';
+import { timeToBucket, shortBucket } from '../utils.js';
 import { MessageList } from './messagePanels.jsx';
 
 export function SequentialFlow({
@@ -23,21 +23,33 @@ export function SequentialFlow({
   const plotW = cols * cell.w;
   const xAt = (i) => LABEL_COL + i * cell.w + cell.w / 2;
 
+  // ホバー中の node（現在はラベル常時表示なので、強調用途のみ）。
+  const [hoveredId, setHoveredId] = useState(null);
+
+  const R = 9; // node 半径（小さくして縦幅を抑える）
+
   // 各 event を現在の time 窓の bucket index に解決（窓外なら描かない）。
+  // ラベルはホバー/選択時のみ出すので、段(stack)割り当ては node の幅だけで判定する。
+  // これにより縦幅が最小になる（常時ラベルだと daily で 7 段 ≒ 366px 必要だった）。
   const placed = useMemo(() => {
     const arr = [];
     for (const ev of SEQ_EVENTS) {
       const bi = (buckets || []).indexOf(timeToBucket(ev.time, granularity));
       if (bi < 0) continue;
-      arr.push({ ...ev, bi, x: xAt(bi), stack: 0 });
+      const x = xAt(bi);
+      const w = 2 * R + 6;
+      arr.push({ ...ev, bi, x, left: x - w / 2, right: x + w / 2, stack: 0 });
     }
-    // 同じ bucket に複数 event（daily 粒度など）→ 縦に段積みして重なりを避ける。
-    const byBi = new Map();
+    arr.sort((a, b) => a.left - b.left || a.bi - b.bi);
+    const laneRight = [];
     for (const p of arr) {
-      if (!byBi.has(p.bi)) byBi.set(p.bi, []);
-      byBi.get(p.bi).push(p);
+      let lane = 0;
+      for (; lane < laneRight.length; lane++) {
+        if (laneRight[lane] <= p.left - 4) break;
+      }
+      p.stack = lane;
+      laneRight[lane] = p.right;
     }
-    for (const list of byBi.values()) list.forEach((p, k) => { p.stack = k; });
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buckets, granularity]);
@@ -64,18 +76,52 @@ export function SequentialFlow({
       arc.tier = t;
       tierEnd[t] = arc.x2;
     }
+
+    // 同じ node に複数の矢印が出入りすると、始点/終点が1点に集中して矢尻が重なる。
+    // → node ごとに「入ってくる弧」「出ていく弧」を左右に扇状に散らす。
+    const inBy = new Map();  // nodeId -> 入ってくる arc[]
+    const outBy = new Map(); // nodeId -> 出ていく arc[]
+    for (const arc of es) {
+      if (!outBy.has(arc.from)) outBy.set(arc.from, []);
+      outBy.get(arc.from).push(arc);
+      if (!inBy.has(arc.to)) inBy.set(arc.to, []);
+      inBy.get(arc.to).push(arc);
+    }
+    const SPREAD = 3.6; // 隣り合う端点の水平間隔(px)。最多入力の mosaic(5本)でも node 内に収まる幅。
+    const fan = (list, key) => {
+      // 相手ノードの x 順に並べ、中央基準で左右に振り分ける
+      list.sort((p, q) => (key === 'in' ? p.a.x - q.a.x : p.b.x - q.b.x));
+      const n = list.length;
+      list.forEach((arc, i) => {
+        const off = (i - (n - 1) / 2) * SPREAD;
+        if (key === 'in') arc.dxIn = off; else arc.dxOut = off;
+      });
+    };
+    for (const list of inBy.values()) fan(list, 'in');
+    for (const list of outBy.values()) fan(list, 'out');
+    for (const arc of es) {
+      arc.dxIn = arc.dxIn || 0;
+      arc.dxOut = arc.dxOut || 0;
+    }
     return es;
   }, [posById]);
 
   const maxTier = arcs.reduce((mx, a) => Math.max(mx, a.tier), -1);
-  const tierH = 15;
-  const arcRegionH = (maxTier + 1) * tierH + 12;
-  const R = 13;
-  const stackGap = 2 * R + 26;
+  const tierH = 12;
+  const arcRegionH = (maxTier + 1) * tierH + 10;
+  const stackGap = 2 * R + 6; // node のみ（ラベルはホバー表示）なので詰められる
   const nodeBaseY = arcRegionH + R + 4;
   const maxStack = placed.reduce((mx, p) => Math.max(mx, p.stack || 0), 0);
-  const svgH = nodeBaseY + R + maxStack * stackGap + 26;
+  // 下部に time 軸（heatmap と同じ bucket）。
+  // hourly のときだけ日境界の日付ラベルを軸線の上に出すので、その分の余白を確保する。
+  const dayLabelPad = granularity === 'hourly' ? 16 : 4;
+  const axisTop = nodeBaseY + R + maxStack * stackGap + dayLabelPad;
+  const axisH = 22;
+  const svgH = axisTop + axisH;
   const nodeY = (p) => nodeBaseY + (p.stack || 0) * stackGap;
+
+  // ホバーラベル用に右端の余白を少し確保する。
+  const rightPad = 12;
 
   const selEvent = selectedEventId
     ? (posById.get(selectedEventId) || SEQ_EVENTS.find(e => e.id === selectedEventId))
@@ -86,52 +132,142 @@ export function SequentialFlow({
     <div className="seqflow-card">
       <div className="seqflow-head">
         <h3>Sequence of events → the release past embargo enforcement</h3>
-        <span className="muted small">
-          Nodes = key events · lines = causal links (dashed = blind-spot) · x-axis aligned with the heatmap below · click a node for details
+        <span className="muted small seqflow-hint"
+          title="Nodes = key events, positioned on the same time buckets as the heatmap below. Lines = causal links; dashed lines are enabling conditions / monitoring blind-spots rather than direct causes.">
+          hover a node for its name · click for details
         </span>
       </div>
 
       <div className="seqflow-scroll" ref={scrollRef} onScroll={onScroll}>
-        <svg width={LABEL_COL + plotW + 8} height={svgH} className="seqflow-svg">
+        <svg width={LABEL_COL + plotW + rightPad} height={svgH} className="seqflow-svg">
           <defs>
-            <marker id="seq-arrow" viewBox="0 0 10 10" refX="8" refY="5"
-              markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M1 1 L8 5 L1 9" fill="none" stroke="context-stroke" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id="seq-arrow-direct" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M1 1 L9 5 L1 9 Z" fill="#8fb2d8" />
+            </marker>
+            <marker id="seq-arrow-enabling" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M1 1 L9 5 L1 9 Z" fill="#a78bfa" />
             </marker>
           </defs>
 
           <text x={10} y={nodeBaseY + 4} fontSize="11" fill="#7a8aa0">Flow</text>
 
-          {/* 因果の弧（tier で高さを分けて重ならせない） */}
+          {/* 因果の弧。tier で高さを分け、端点は node ごとに扇状に散らして矢尻の重なりを防ぐ。
+              選択/ホバー中の node に繋がる弧は強調し、それ以外は淡くして経路を追えるようにする。 */}
           {arcs.map((arc, i) => {
-            const yA = nodeY(arc.a) - R;
-            const yB = nodeY(arc.b) - R;
+            const focusId = hoveredId || selectedEventId;
+            const isFocus = focusId && (arc.from === focusId || arc.to === focusId);
+            const dimmed = focusId && !isFocus;
+
             const topY = arcRegionH - (arc.tier + 1) * tierH; // tier が高いほど上（y 小）
             const dash = arc.type === 'enabling' ? '5 4' : undefined;
             const color = arc.type === 'enabling' ? '#a78bfa' : '#8fb2d8';
-            const x1 = arc.a.x, x2 = arc.b.x;
-            const d = `M ${x1} ${yA} C ${x1} ${topY}, ${x2} ${topY}, ${x2} ${yB}`;
+
+            // 始点: 出発 node の上端（扇状オフセット）。
+            const x1 = arc.a.x + arc.dxOut;
+            const y1 = nodeY(arc.a) - R;
+            // 終点: 到着 node の上端の少し手前で止め、矢尻が円に食い込まないようにする。
+            const GAP = 4;
+            const x2 = arc.b.x + arc.dxIn;
+            const y2 = nodeY(arc.b) - R - GAP;
+
+            const d = `M ${x1} ${y1} C ${x1} ${topY}, ${x2} ${topY}, ${x2} ${y2}`;
             return (
-              <path key={i} d={d} fill="none" stroke={color} strokeWidth="1.6"
-                strokeDasharray={dash} markerEnd="url(#seq-arrow)" opacity="0.85" />
+              <path key={i} d={d} fill="none" stroke={color}
+                strokeWidth={isFocus ? 2.4 : 1.6}
+                strokeDasharray={dash}
+                markerEnd={`url(#${arc.type === 'enabling' ? 'seq-arrow-enabling' : 'seq-arrow-direct'})`}
+                opacity={dimmed ? 0.18 : (isFocus ? 1 : 0.8)} />
             );
           })}
 
-          {/* event node（番号入りの丸 + 短いタイトル） */}
+          {/* event node（ラベルはホバー/選択時のみ → 縦幅を最小化） */}
           {placed.map(p => {
             const y = nodeY(p);
             const kind = SEQ_KINDS[p.kind] || SEQ_KINDS.decision;
             const sel = selectedEventId === p.id;
+            const hov = hoveredId === p.id;
+            const focusId = hoveredId || selectedEventId;
+            // focus 中の node に因果で繋がっている node は強調、無関係な node は淡くする。
+            const connected = focusId && arcs.some(a =>
+              (a.from === focusId && a.to === p.id) || (a.to === focusId && a.from === p.id));
+            const dimmed = focusId && !connected && focusId !== p.id;
             return (
-              <g key={p.id} style={{ cursor: 'pointer' }} onClick={() => onSelectEvent(p.id)}>
-                <circle cx={p.x} cy={y} r={sel ? R + 2 : R} fill={kind.color}
-                  stroke={sel ? '#ffffff' : '#0b1622'} strokeWidth={sel ? 2 : 1} />
-                <text x={p.x} y={y + 4} textAnchor="middle" fontSize="12" fontWeight="700" fill="#0b1622">{p.order}</text>
-                <text x={p.x} y={y + R + 14} textAnchor="middle" fontSize="10"
-                  fill={sel ? '#ffffff' : '#9fb2c8'} fontWeight={sel ? '700' : '400'}>{p.title}</text>
+              <g key={p.id} style={{ cursor: 'pointer' }}
+                opacity={dimmed ? 0.28 : 1}
+                onClick={() => onSelectEvent(p.id)}
+                onMouseEnter={() => setHoveredId(p.id)}
+                onMouseLeave={() => setHoveredId(cur => (cur === p.id ? null : cur))}>
+                <title>{p.title}</title>
+                <circle cx={p.x} cy={y} r={sel || hov ? R + 2 : R} fill={kind.color}
+                  stroke={sel || hov ? '#ffffff' : (connected ? '#c3cee0' : '#0b1622')}
+                  strokeWidth={sel || hov ? 2 : (connected ? 1.5 : 1)} />
               </g>
             );
           })}
+
+          {/* time 軸（heatmap と同じ bucket = ラウンド単位。x も heatmap と完全一致） */}
+          <g className="sf-axis">
+            <line x1={LABEL_COL} y1={axisTop} x2={LABEL_COL + plotW} y2={axisTop}
+              stroke="#2a3a52" strokeWidth="1" />
+            <text x={10} y={axisTop + 14} fontSize="11" fill="#7a8aa0">Time</text>
+            {(buckets || []).map((b, i) => {
+              const x = xAt(i);
+              const hasEvent = placed.some(p => p.bi === i);
+              // hourly は "06-05 09:00" だと隣と重なるので、軸では時刻のみ ("09:00") を出し、
+              // 日付は日境界（その日の最初の bucket）にだけ2行目として出す。
+              const isHourly = granularity === 'hourly';
+              const label = isHourly ? shortBucket(b, granularity).slice(6) : shortBucket(b, granularity);
+              const dayOf = (s) => (s || '').slice(0, 10);
+              const isDayStart = isHourly && (i === 0 || dayOf(buckets[i - 1]) !== dayOf(b));
+              // ラベル幅に応じて間引く（イベントのある bucket は常に表示）。
+              const approxLabelW = isHourly ? 34 : 30;
+              const step = Math.max(1, Math.ceil(approxLabelW / cell.w));
+              const show = i % step === 0;
+              return (
+                <g key={b}>
+                  <line x1={x} y1={axisTop} x2={x} y2={axisTop + (hasEvent ? 6 : 3)}
+                    stroke={hasEvent ? '#8fb2d8' : '#2a3a52'} strokeWidth={hasEvent ? 1.5 : 1} />
+                  {(show || hasEvent) && (
+                    <text x={x} y={axisTop + 18} textAnchor="middle" fontSize="10"
+                      fill={hasEvent ? '#c3cee0' : '#7a8aa0'} fontWeight={hasEvent ? '700' : '400'}>
+                      {label}
+                    </text>
+                  )}
+                  {isDayStart && (
+                    <text x={x} y={axisTop - 4} textAnchor="middle" fontSize="10" fill="#9fb2c8" fontWeight="700">
+                      {b.slice(5, 10)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+
+          {/* ラベルは hover(なければ selected) の1つだけ、最前面に描く */}
+          {(() => {
+            const labelId = hoveredId || selectedEventId;
+            if (!labelId) return null;
+            const p = posById.get(labelId);
+            if (!p) return null;
+            const y = nodeY(p);
+            const text = p.title;
+            const w = Math.max(40, text.length * 6.2 + 14);
+            const rightEdge = LABEL_COL + plotW + rightPad;
+            let bx = p.x - w / 2;
+            if (bx + w > rightEdge) bx = rightEdge - w;
+            if (bx < 2) bx = 2;
+            // 既定はノード上側。上に余白が無ければ下側に出す。
+            const above = y - R - 24;
+            const by = above >= 2 ? above : (y + R + 6);
+            return (
+              <g pointerEvents="none">
+                <rect x={bx} y={by} width={w} height={20} rx={5} fill="#0b1622" stroke="#3b4d68" strokeWidth="1" opacity="0.97" />
+                <text x={bx + w / 2} y={by + 14} textAnchor="middle" fontSize="11" fill="#e5edf7">{text}</text>
+              </g>
+            );
+          })()}
         </svg>
       </div>
 
@@ -148,7 +284,7 @@ export function SequentialFlow({
       {selEvent && (
         <div className="seqflow-detail">
           <div className="sf-detail-head">
-            <span className="sf-badge" style={{ background: selKind.color }}>{selEvent.order}</span>
+            <span className="sf-badge" style={{ background: selKind.color }} />
             <b>{selEvent.title}</b>
             <span className="sf-kind" style={{ color: selKind.color, borderColor: selKind.color }}>{selKind.label}</span>
             <span className="muted small">{selEvent.time.replace('T', ' ')}</span>

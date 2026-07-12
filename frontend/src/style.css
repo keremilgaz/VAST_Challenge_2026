@@ -170,6 +170,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .msg-meta .internal-merger { background: #1e2f23; border-color: #40784b; color: #bbf7d0; }
 .msg-meta .keyword-score { background: #172554; border-color: #3b82f6; color: #bfdbfe; }
 .msg-meta .event-related { background: #2a1e3d; border-color: #7c3aed; color: #ddd0ff; font-weight: 700; }
+.kw-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-left: 5px; border-radius: 50%;
+  background: #263244; color: #9fb2c8; font-size: 10px; font-weight: 700;
+  cursor: help; vertical-align: middle; user-select: none; flex: none;
+}
+.kw-help:hover { background: #34435c; color: #e5edf7; }
+.merger-check-row { display: flex; align-items: center; gap: 2px; }
+.merger-check-row .merger-check { flex: 1 1 auto; }
 details { color: #a8b4c6; margin-top: 6px; }
 summary { cursor: pointer; }
 
@@ -178,14 +187,18 @@ summary { cursor: pointer; }
    ============================================ */
 .seqflow-card {
   background: #141b26; border: 1px solid #263244; border-radius: 16px;
-  padding: 16px; box-shadow: 0 14px 35px rgba(0,0,0,0.22); margin-bottom: 12px;
+  padding: 10px 14px 12px; box-shadow: 0 14px 35px rgba(0,0,0,0.22); margin-bottom: 10px;
 }
-.seqflow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.seqflow-head h3 { margin: 0; }
-.seqflow-scroll { overflow-x: auto; width: 100%; padding-bottom: 4px; }
+.seqflow-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 4px;
+}
+.seqflow-head h3 { margin: 0; font-size: 14px; line-height: 1.3; }
+.seqflow-hint { cursor: help; }
+.seqflow-scroll { overflow-x: auto; width: 100%; padding-bottom: 2px; }
 .seqflow-svg { display: block; min-width: max-content; }
-.seqflow-legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-.sf-key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #c3cee0; }
+.seqflow-legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.sf-key { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #c3cee0; }
 .sf-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; }
 .sf-line { display: inline-block; width: 20px; height: 0; border-top: 2px solid #8fb2d8; }
 .sf-line.dashed { border-top: 2px dashed #a78bfa; }

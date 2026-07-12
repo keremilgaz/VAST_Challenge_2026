@@ -7,6 +7,7 @@ import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatRecipients } from '../utils.js';
 import { EVENT_RELATED_BY_MESSAGE_ID } from '../constants.js';
+import { messageNumber } from '../commIdMap.js';
 import { AGENTS } from '../network.jsx';
 
 // ============================================
@@ -108,7 +109,11 @@ export function MessageList({ messages, selectedMessageId, onSelectMessage, rend
         )}
       </div>
       <div className="sub-meta">
-        Role: {m.agent_role || '-'} / Recipients: {formatRecipients(m.recipients)} / Responding to: {m.responding_to || '-'}
+        Role: {m.agent_role || '-'} / Recipients: {formatRecipients(m.recipients)} / Responding to: {(() => {
+          if (!m.responding_to) return '-';
+          const n = messageNumber(m.responding_to);
+          return n != null ? `#${n}` : m.responding_to;
+        })()}
       </div>
       <p>{m.content}</p>
       {(m.internal_reacting || m.internal_rationalizing || m.internal_deliberating) && (
@@ -412,7 +417,7 @@ export function AjayTimelineModal({ open, messages, status, onClose, selectedMes
       <div className="flow-modal" onClick={e => e.stopPropagation()}>
         <div className="flow-modal-head">
           <div>
-            <h3>Ajay's hints timeline</h3>
+            <h3>Ajay (CEO of TenantThread) hints timeline</h3>
             <div className="flow-sub">
               Ajay never sends a message himself — these are the messages where other agents
               quote or refer to him, in chronological order · {messages.length} message{messages.length === 1 ? '' : 's'}

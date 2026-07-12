@@ -67,6 +67,20 @@ def message_context(message_id: str):
     return ctx
 
 
+@router.get("/api/message-id-map")
+def message_id_map():
+    """
+    message_id → comm_id（表示用の #番号）の全体マップ。
+    UI 側で responding_to（実体は message_id）を #番号 で表示するために使う。
+    backend/データ側は message_id をそのまま保持する（スレッド構築などが依存するため）。
+    """
+    try:
+        all_msgs = fetch_all_messages_for_context()
+    except Exception:
+        return {}
+    return {m["message_id"]: m.get("comm_id") for m in all_msgs if m.get("comm_id") is not None}
+
+
 @router.get("/api/messages-by-ids")
 def messages_by_ids(ids: Optional[list[str]] = Query(default=None)):
     """

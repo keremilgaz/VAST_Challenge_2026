@@ -28,7 +28,8 @@ import { Collapsible } from './components/Collapsible.jsx';
 import { CrisisTimeline } from './components/CrisisTimeline.jsx';
 import { StockSentimentLineChart } from './components/StockSentimentLineChart.jsx';
 import { SequentialFlow } from './components/SequentialFlow.jsx';
-import { SEQ_EVENTS } from './constants.js';
+import { SEQ_EVENTS, MERGER_KEYWORDS } from './constants.js';
+import { loadCommIdMap } from './commIdMap.js';
 import {
   MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal, AjayTimelineModal,
 } from './components/messagePanels.jsx';
@@ -276,6 +277,13 @@ function App() {
 
   useEffect(() => { loadOptions(); }, []);
   useEffect(() => { loadTimeline(); }, []);
+  // message_id → #番号 マップを起動時に1回ロード（responding_to の表示用）。
+  useEffect(() => {
+    fetch(`${API}/api/message-id-map`)
+      .then(r => (r.ok ? r.json() : {}))
+      .then(loadCommIdMap)
+      .catch(() => {});
+  }, []);
   useEffect(() => { loadHeatmap(); }, [loadHeatmap]);
   useEffect(() => { loadLineChart(); }, [loadLineChart]);
   useEffect(() => { loadNetwork(); }, [loadNetwork]);
@@ -489,6 +497,21 @@ function App() {
 
   // network専用 filter の toggle / helper（heatmapには影響しない）
   const toggleNetCombo = (t) => toggleInSet(setNetCombos, allComboKeys, t);
+  // network の channel も heatmap と同じ external / internal グループで扱う。
+  const isNetComboActive = (key) => netCombos.length === 0 || netCombos.includes(key);
+  const isNetGroupAllActive = (groupCombos) => groupCombos.length > 0 && groupCombos.every(c => isNetComboActive(c.key));
+  const toggleNetGroup = (groupCombos) => {
+    const groupKeys = groupCombos.map(c => c.key);
+    setNetCombos(prev => {
+      const base = prev.length === 0 ? allComboKeys.slice() : prev.slice();
+      const allOn = groupKeys.every(k => base.includes(k));
+      let next = allOn
+        ? base.filter(k => !groupKeys.includes(k))
+        : Array.from(new Set([...base, ...groupKeys]));
+      if (allComboKeys.length && allComboKeys.every(k => next.includes(k))) next = [];
+      return next;
+    });
+  };
   const toggleNetAgent = (id) => toggleInSet(setNetAgentFilter, agentIds(), id);
   const useFullNetTimeRange = () => { setNetStartTime(apiTimeToInputValue(options.min_time)); setNetEndTime(apiTimeToInputValue(options.max_time)); };
   const clearNetTimeRange = () => { setNetStartTime(''); setNetEndTime(''); };
@@ -756,7 +779,6 @@ function App() {
         <div className="gc-counts">
           Merger-related keyword: <b>{options.combined_merger_count}</b> / {options.total_count}
           {' · '}Content: {options.merger_count} {' · '}Inner thought: {options.internal_merger_count}
-          {' · '}Keywords: {(options.merger_keywords || []).join(', ') || '—'}
         </div>
       </section>
 
@@ -812,27 +834,6 @@ function App() {
                     {[['count', 'Count'], ['sentiment', 'BERT sentiment'], ['semantic_change', 'Semantic change']].map(([v, l]) => (
                       <button key={v} className={`seg-btn ${heatmapMode === v ? 'on' : ''}`} onClick={() => setHeatmapMode(v)}>{l}</button>
                     ))}
-                  </div>
-                </Collapsible>
-
-                {/* heatmapSort は rank chip（network の #1…#N）や mirror mode の説明でも
-                    参照されるが、以前のリファクタで並び替え UI 自体が消えていた。ここで復元する。 */}
-                <Collapsible title="Sort agent rows" defaultOpen={false}>
-                  <div className="seg seg-stack">
-                    {[['agent_id', 'Agent name'], ['total', 'Total messages'], ['sentiment', 'Mean sentiment']].map(([v, l]) => (
-                      <button key={v} className={`seg-btn ${heatmapSort.key === v ? 'on' : ''}`}
-                        disabled={v === 'sentiment' && heatmapMode !== 'sentiment'}
-                        title={v === 'sentiment' && heatmapMode !== 'sentiment'
-                          ? 'Switch heatmap mode to "BERT sentiment" first — sentiment values are only computed in that mode.'
-                          : undefined}
-                        onClick={() => setHeatmapSort(s => ({ ...s, key: v }))}>{l}</button>
-                    ))}
-                  </div>
-                  <div className="seg" style={{ marginTop: 6 }}>
-                    <button type="button" className="seg-btn"
-                      onClick={() => setHeatmapSort(s => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}>
-                      {heatmapSort.dir === 'asc' ? '↑ ascending' : '↓ descending'}
-                    </button>
                   </div>
                 </Collapsible>
 
@@ -896,10 +897,15 @@ function App() {
                 </Collapsible>
 
                 <div className="control-block">
-                  <label className="check merger-check">
-                    <input type="checkbox" checked={mergerOnly} onChange={e => setMergerOnly(e.target.checked)} />
-                    Merger-related only in selected text sources
-                  </label>
+                  <div className="merger-check-row">
+                    <label className="check merger-check">
+                      <input type="checkbox" checked={mergerOnly} onChange={e => setMergerOnly(e.target.checked)} />
+                      Merger-related only in selected text sources
+                    </label>
+                    <span className="kw-help" tabIndex={0}
+                      title={`Merger-related keywords: ${MERGER_KEYWORDS.join(', ')}`}
+                      aria-label={`Merger-related keywords: ${MERGER_KEYWORDS.join(', ')}`}>?</span>
+                  </div>
                 </div>
 
                 <Collapsible title="Agents" defaultOpen={false}>
@@ -1104,11 +1110,32 @@ function App() {
                   <div className={netMirrorsHeatmap ? 'disabled' : ''}>
                   <div className="control-title">Message channel</div>
                   <label className="check select-all-row"><input type="checkbox" checked={netCombos.length === 0} onChange={() => setNetCombos([])} /> All</label>
-                  <div className="type-grid">
-                    {comboOptions.map(c => (
-                      <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isInSet(netCombos, c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
-                    ))}
-                  </div>
+                  {combosByGroup.external.length > 0 && (
+                    <div className="type-group">
+                      <label className="check group-head">
+                        <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.external)} onChange={() => toggleNetGroup(combosByGroup.external)} />
+                        External <span className="muted small">(public-facing)</span>
+                      </label>
+                      <div className="type-grid indent">
+                        {combosByGroup.external.map(c => (
+                          <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {combosByGroup.internal.length > 0 && (
+                    <div className="type-group">
+                      <label className="check group-head">
+                        <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.internal)} onChange={() => toggleNetGroup(combosByGroup.internal)} />
+                        Internal <span className="muted small">(in-org conversation)</span>
+                      </label>
+                      <div className="type-grid indent">
+                        {combosByGroup.internal.map(c => (
+                          <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="control-title">Agent type</div>
                   <label className="check select-all-row"><input type="checkbox" checked={netAgentFilter.length === 0} onChange={() => setNetAgentFilter([])} /> All</label>
                   <div className="type-grid">
@@ -1124,11 +1151,16 @@ function App() {
 
                 <div className="control-block">
                   {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — taken from the heatmap.</div>}
-                  <label className={`check merger-check ${netMirrorsHeatmap ? 'disabled' : ''}`}>
-                    <input type="checkbox" checked={netMergerOnly} disabled={netMirrorsHeatmap}
-                      onChange={e => setNetMergerOnly(e.target.checked)} />
-                    Merger-related keyword only
-                  </label>
+                  <div className="merger-check-row">
+                    <label className={`check merger-check ${netMirrorsHeatmap ? 'disabled' : ''}`}>
+                      <input type="checkbox" checked={netMergerOnly} disabled={netMirrorsHeatmap}
+                        onChange={e => setNetMergerOnly(e.target.checked)} />
+                      Merger-related keyword only
+                    </label>
+                    <span className="kw-help" tabIndex={0}
+                      title={`Merger-related keywords: ${MERGER_KEYWORDS.join(', ')}`}
+                      aria-label={`Merger-related keywords: ${MERGER_KEYWORDS.join(', ')}`}>?</span>
+                  </div>
                 </div>
 
                 {/* networkLayout / networkSort / colorBySentiment の state は存在するのに
@@ -1207,16 +1239,16 @@ function App() {
               <div className="heatmap-title">
                 <div className="nv-head-left">
                   <h2>Communication network (reply graph)</h2>
-                  <span className="muted small">{(displayNetwork.nodes || []).filter(n => !n.inferred).length} agents{(displayNetwork.nodes || []).some(n => n.inferred) ? ' + Ajay (inferred)' : ''} · {displayNetwork.edges?.length || 0} edges</span>
+                  <span className="muted small">{(displayNetwork.nodes || []).filter(n => !n.inferred).length} agents{(displayNetwork.nodes || []).some(n => n.inferred) ? ' + Inferred Ajay (CEO of TenantThread) node' : ''} · {displayNetwork.edges?.length || 0} edges</span>
                 </div>
                 <div className="nv-head-right">
                   <label className="check ajay-toggle" title="Add 'Ajay' as an inferred node — Ajay is NOT in the data, only mentioned in messages. Edges = how often each agent mentions Ajay (in content + inner thoughts). Shown with a dashed/marked style.">
                     <input type="checkbox" checked={showAjay} onChange={e => setShowAjay(e.target.checked)} />
-                    Ajay (inferred)
+                    Inferred Ajay (CEO of TenantThread) node
                   </label>
                   <button type="button" className="ajay-hints-btn" onClick={openAjayTimeline}
                     title="Ajay is never the sender of a message — he's only quoted or referenced inside other agents' messages/inner thoughts. This opens those mentions in chronological order so you can read what he actually hinted at, instead of just a mention count.">
-                    Ajay's hints timeline
+                    Ajay (CEO of TenantThread) hints timeline
                   </button>
                   <div className="netmode-toggles" role="group" aria-label="Network mode">
                     <label className="check netmode-toggle" title="Filters, sort order and node size come from the heatmap's own settings instead of network's own filters.">
