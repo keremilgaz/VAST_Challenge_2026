@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 import numpy as np
 
 from ..db import get_driver
+from ..config import RECIPIENT_ROLE_TO_AGENT
 from ..domain import (
     normalize_message_types,
     normalize_text_sources,
@@ -82,6 +83,33 @@ def network(
     ORDER BY weight DESC
     """
 
+    # ── "Gelen mesaj" sayımı (unresponsive/silent agent tespiti için) ──
+    # node_query yalnızca mesaj GÖNDEREN agent'ları döndürür. Bir agent belirli
+    # bir zaman aralığında hiç mesaj göndermezse node tamamen kaybolur — ona
+    # mesaj gelmeye devam etse bile (heatmap'te görünen "PT susuyor" durumu).
+    # Bu query her agent için, mevcut filtre penceresinde BAŞKA agent'lardan
+    # kendisine gelen mesajları sayar:
+    #   1. recipients listesinde agent'ın role token'ı geçen mesajlar
+    #      (recipients JSON string olarak saklanır, ör. '["platform_trust"]')
+    #   2. agent'ın bir mesajına REPLIES_TO ile bağlanan mesajlar
+    # Böylece "0 gönderdi ama N aldı" olan agent'lar network'ten düşmez;
+    # frontend bunları 'silent/unresponsive' olarak işaretleyebilir.
+    agent_role_tokens = {agent: role for role, agent in RECIPIENT_ROLE_TO_AGENT.items()}
+    received_query = f"""
+    MATCH (a:Agent)
+    OPTIONAL MATCH (sender:Agent)-[:SENT]->(m:Message)
+    WHERE sender.agent_id <> a.agent_id
+      AND (
+        m.recipients CONTAINS ('"' + coalesce($agent_role_tokens[a.agent_id], '__none__') + '"')
+        OR (m)-[:REPLIES_TO]->(:Message {{agent_id: a.agent_id}})
+      )
+      {common_where_clause()}
+    RETURN a.agent_id AS id,
+           coalesce(a.agent_label, a.agent_id) AS label,
+           count(DISTINCT m) AS received_count
+    ORDER BY id
+    """
+
     params = dict(
         merger_only=merger_only,
         message_types=selected_message_types,
@@ -90,6 +118,7 @@ def network(
         start_time=start_time,
         end_time=end_time,
         keyword=normalized_keyword,
+        agent_role_tokens=agent_role_tokens,
     )
 
     # ── 推論ノード "Ajay" ──
@@ -115,7 +144,24 @@ def network(
     with get_driver().session() as session:
         nodes = [dict(r) for r in session.run(node_query, **params)]
         edges = [dict(r) for r in session.run(edge_query, **params)]
+        received_rows = [dict(r) for r in session.run(received_query, **params)]
         ajay_rows = [dict(r) for r in session.run(ajay_query, **params)] if include_ajay else []
+
+    # received_count'u node'lara işle; hiç mesaj göndermemiş ama mesaj almış
+    # agent'ları da (message_count=0) node olarak ekle ki network'ten kaybolmasınlar.
+    received_by_id = {r["id"]: r for r in received_rows}
+    node_ids = {n["id"] for n in nodes}
+    for n in nodes:
+        n["received_count"] = received_by_id.get(n["id"], {}).get("received_count", 0)
+    for r in received_rows:
+        if r["received_count"] > 0 and r["id"] not in node_ids:
+            nodes.append({
+                "id": r["id"],
+                "label": r["label"],
+                "message_count": 0,
+                "merger_related_count": 0,
+                "received_count": r["received_count"],
+            })
 
     if include_ajay and ajay_rows:
         total_mentions = sum(r["weight"] for r in ajay_rows)

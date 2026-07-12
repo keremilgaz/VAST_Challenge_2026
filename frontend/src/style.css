@@ -259,6 +259,15 @@ summary { cursor: pointer; }
 .net-edge.edge-new .edge-glow { animation: edgePulse 1.1s ease-in-out 3; }
 .net-edge.edge-new .net-edge-lbl { opacity: 1; }
 
+/* ---- silent / unresponsive agent (mesaj alıyor ama hiç göndermiyor) ---- */
+@keyframes silentPulse {
+  0%, 100% { stroke-opacity: .25; }
+  50%      { stroke-opacity: .95; }
+}
+.net-node.silent .n-silent-ring { animation: silentPulse 1.6s ease-in-out infinite; }
+.net-node.silent .n-circle { stroke-opacity: .55; }
+.net-legend .nl-item.nl-silent { color: #ff8a80; }
+
 /* ---- olay işaretleri (leak / embargo) ---- */
 .tl-slider-wrap .tl-event-marker {
   position: absolute; top: -3px; bottom: 0; width: 2px; border-radius: 1px;
