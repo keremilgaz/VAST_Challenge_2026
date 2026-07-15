@@ -21,7 +21,7 @@ import './style.css';
 
 import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL, EVENT_MARKERS } from './constants.js';
 import {
-  shortBucket, countColor, sentimentCellColor, semanticCellColor,
+  shortBucket, countColor, sentimentCellColor,
   apiTimeToInputValue, inputValueToApiTime, fmtSigned, fmtRoundLabel, timeToBucket,
 } from './utils.js';
 import { Collapsible } from './components/Collapsible.jsx';
@@ -45,8 +45,7 @@ function App() {
   const [agentFilter, setAgentFilter] = useState([]); // 空=All
 
   // ---- heatmap固有 state ----
-  const [heatmapMode, setHeatmapMode] = useState('count'); // count | sentiment | semantic_change
-  const [semanticComparisonMode, setSemanticComparisonMode] = useState('previous'); // previous | next
+  const [heatmapMode, setHeatmapMode] = useState('count'); // count | sentiment
   const [heatmapSort, setHeatmapSort] = useState({ key: 'agent_id', dir: 'asc' }); // key: agent_id|total|sentiment
 
   // ---- network固有 state ----
@@ -718,7 +717,6 @@ function App() {
 
   // 選択中cellのsummary値
   const selectedCellData = selected ? cellMap.get(`${selected.agent.agent_id}|${selected.bucket}`) : null;
-  const selectedSemantic = selectedCellData ? selectedCellData.semantic_distance_prev : null; 
 
   return (
     <div className="app">
@@ -732,9 +730,9 @@ function App() {
           ============================================ */}
       <section className="global-controls">
         <span className="gc-label">Show visualizations:</span>
-        <label className="check"><input type="checkbox" checked={showSeqFlow} onChange={e => setShowSeqFlow(e.target.checked)} disabled={sideBySide} /> Event flow</label>
         <label className="check"><input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} /> Heatmap</label>
-        <label className="check"><input type="checkbox" checked={showLineChart} onChange={e => setShowLineChart(e.target.checked)} /> Line Chart</label>
+        <label className="check"><input type="checkbox" checked={showSeqFlow} onChange={e => setShowSeqFlow(e.target.checked)} disabled={sideBySide} /> Event flow</label>
+        <label className="check"><input type="checkbox" checked={showLineChart} onChange={e => setShowLineChart(e.target.checked)} disabled={sideBySide} /> Line Chart</label>
         <label className="check"><input type="checkbox" checked={showNetwork} onChange={e => setShowNetwork(e.target.checked)} /> Network</label>
         <button type="button" className={`fp-toggle gc-compare-toggle ${sideBySide ? 'on' : ''}`}
           onClick={() => setSideBySide(v => !v)}
@@ -798,12 +796,11 @@ function App() {
                     <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)}
                       placeholder="e.g. merger, embargo, lawsuit" />
                   </label>
-                  <div className="muted small">Searches content + inner thoughts. With a keyword, cell value = matches.</div>
                 </div>
 
                 <Collapsible title="Heatmap mode" defaultOpen={true}>
                   <div className="seg seg-stack">
-                    {[['count', 'Count'], ['sentiment', 'BERT sentiment'], ['semantic_change', 'Semantic change']].map(([v, l]) => (
+                    {[['sentiment', 'Sentiment Heatmap'], ['count', 'Count Heatmap']].map(([v, l]) => (
                       <button key={v} className={`seg-btn ${heatmapMode === v ? 'on' : ''}`} onClick={() => setHeatmapMode(v)}>{l}</button>
                     ))}
                   </div>
@@ -912,28 +909,13 @@ function App() {
           </aside>
           )}
 
-          {/* ---- right: sequential flow (heatmap の上) + heatmap + detail + line chart ---- */}
+          {/* ---- right: heatmap + detail + event flow + line chart（この順で縦積み） ---- */}
           <div className="viz-col">
-            {/* ---- Sequential flow（heatmap の x 軸に合わせた横時系列。スクロール連動） ---- */}
-            {effShowSeqFlow && (
-              <SequentialFlow
-                granularity={granularity}
-                buckets={buckets}
-                scrollRef={seqScrollRef}
-                onScroll={handleSeqScroll}
-                selectedEventId={seqEventId}
-                onSelectEvent={handleSelectSeqEvent}
-                eventMessages={seqEventMessages}
-                eventMessagesStatus={seqMsgStatus}
-                selectedMessageId={selectedMessageId}
-                onSelectMessage={selectMessage}
-              />
-            )}
             {showHeatmap && (
             <div className="heatmap-card">
               <div className="heatmap-title">
                 <div>
-                  <h2>{granularity === 'daily' ? 'Daily' : 'Hourly'} · {heatmapMode === 'count' ? 'message volume' : heatmapMode === 'sentiment' ? 'BERT sentiment' : 'semantic change'}</h2>
+                  <h2>{granularity === 'daily' ? 'Daily' : 'Hourly'} · {heatmapMode === 'count' ? 'message volume' : 'BERT sentiment'}</h2>
                   <p className="muted small">
                     {selectedCombos.length === 0 ? 'All channels' : selectedCombos.map(comboLabel).join(', ')}
                     {' / '}{selectedTextSources.length === 0 ? 'All text' : selectedTextSources.map(s => TEXT_SOURCE_LABELS[s] || s).join(', ')}
@@ -947,7 +929,6 @@ function App() {
               <div className="legend">
                 {heatmapMode === 'count' && <span className="muted small">Fewer <span className="lg-swatch" style={{ background: '#e3eefb' }} /><span className="lg-swatch" style={{ background: '#93beec' }} /><span className="lg-swatch" style={{ background: '#558fd8' }} /><span className="lg-swatch" style={{ background: '#1a5cc0' }} /> more messages · log scale · <span className="lg-swatch" style={{ background: '#10202f' }} /> empty</span>}
                 {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> neutral <span className="lg-swatch" style={{ background: '#4ade80' }} /> positive · empty = no messages</span>}
-                {heatmapMode === 'semantic_change' && <span className="muted small">Semantic distance: <span className="lg-swatch" style={{ background: '#2a335e' }} /> similar → <span className="lg-swatch" style={{ background: '#9d4ddd' }} /> different · empty = no comparable messages</span>}
               </div>
 
               <div className="heatmap-scroll" ref={heatmapScrollRef} onScroll={handleHeatmapScroll}>
@@ -991,20 +972,13 @@ function App() {
                           const cc = countColor(count, heatmap.max_count);
                           style = { background: cc.bg, opacity: cc.opacity, color: cc.fg };
                           title = `${agent.agent_label} ${b}: ${count}${searchKeyword.trim() ? ` matches` : ' messages'}`;
-                        } else if (heatmapMode === 'sentiment') {
+                        } else {
                           const s = c?.bert_sentiment_score;
                           const cc = sentimentCellColor(count > 0 ? s : null);
                           style = { background: cc.bg, opacity: cc.opacity };
                           title = count === 0 ? `${agent.agent_label} ${b}: No messages`
                             : `${agent.agent_label} ${b}: sentiment ${s == null ? '—' : s.toFixed(2)} (${count} msgs)`;
                           cellValue = (count > 0 && s != null) ? fmtSigned(s) : '';
-                        } else {
-                          const dist = c ? c.semantic_distance_prev : null;
-                          const cc = semanticCellColor(dist);
-                          style = { background: cc.bg, opacity: cc.opacity };
-                          title = dist == null ? `${agent.agent_label} ${b}: No comparable messages`
-                            : `${agent.agent_label} ${b}: semantic distance ${dist.toFixed(2)}`;
-                          cellValue = dist == null ? '' : dist.toFixed(2);
                         }
                         const mks = markersByBucket.get(b);
                         return (
@@ -1028,8 +1002,6 @@ function App() {
             <MessageDetailPanel
               selected={selected}
               selectedCellData={selectedCellData}
-              selectedSemantic={selectedSemantic}
-              semanticComparisonMode={semanticComparisonMode}
               collapsed={isMessageDetailCollapsed}
               setCollapsed={setIsMessageDetailCollapsed}
               messages={messages}
@@ -1040,6 +1012,23 @@ function App() {
               onSelectMessage={selectMessage}
               onOpenFlow={() => setFlowOpen(true)}
             />
+            )}
+
+            {/* ---- Sequential flow（event sequence flow + 選択ノードの関連メッセージ。
+                 heatmap の x 軸に合わせた横時系列。スクロール連動） ---- */}
+            {effShowSeqFlow && (
+              <SequentialFlow
+                granularity={granularity}
+                buckets={buckets}
+                scrollRef={seqScrollRef}
+                onScroll={handleSeqScroll}
+                selectedEventId={seqEventId}
+                onSelectEvent={handleSelectSeqEvent}
+                eventMessages={seqEventMessages}
+                eventMessagesStatus={seqMsgStatus}
+                selectedMessageId={selectedMessageId}
+                onSelectMessage={selectMessage}
+              />
             )}
 
             {/* ---- Line Chart (under the detail panel, x-axis aligned with heatmap) ---- */}

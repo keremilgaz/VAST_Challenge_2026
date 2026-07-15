@@ -85,7 +85,7 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
           <div className="tl-ticks">
             {timeline.map((r, i) => {
               const inRange = i >= startIdx && i <= idx;
-              const h = 4 + 14 * Math.sqrt((r.total_msgs || 0) / maxTotal);
+              const h = 3 + 9 * Math.sqrt((r.total_msgs || 0) / maxTotal);
               const merg = (r.total_msgs ? (r.merger_msgs || 0) / r.total_msgs : 0);
               // sequential 単色 ramp: 白 (#ffffff, merger 低) → 濃い赤 (#8b0000, merger 高)。
               const t = Math.pow(Math.min(1, merg / maxMergRatio), 0.7);
@@ -129,19 +129,13 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
       <div className="tl-meta">
         <span className="tl-round">Rounds {startIdx + 1}–{idx + 1} / {n}</span>
         <span className="tl-date">{fmtRoundLabel(startCur.hour)} → {fmtRoundLabel(cur.hour)}</span>
-        {cur.stock_price_value != null && <span className="tl-stock">${Number(cur.stock_price_value).toFixed(2)}</span>}
-        {cur.market_sentiment && <span className="tl-sent">{cur.market_sentiment}</span>}
         <span className="tl-merger">{cur.merger_msgs || 0} merger-related · {cur.total_msgs || 0} msgs (end round)</span>
         {markers.filter(mk => mk.idx != null).map(mk => (
           <span key={mk.id} className="tl-event-key" style={{ color: mk.color }} title={mk.label}>
             ▍{mk.short} {mk.time.slice(11, 16)}
           </span>
         ))}
-        <span className="tl-kbd-hint" title="Keyboard shortcuts: ←/→ step the end round · Shift+←/→ step the start round · Space play/pause">
-          ⌨ ←→ round · Shift+←→ start · Space play
-        </span>
       </div>
-      {cur.event_headline && <div className="tl-headline">{cur.event_headline}</div>}
     </section>
   );
 }

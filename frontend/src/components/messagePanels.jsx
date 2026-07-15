@@ -43,9 +43,6 @@ export function MessageDetailPanel({ selected, selectedCellData, selectedSemanti
                   <h4>{r.event_headline || '(no headline)'}</h4>
                   <p>{r.event_narrative || ''}</p>
                   <div className="chips">
-                    {r.stock_price && <span>price {r.stock_price}</span>}
-                    {r.percent_change && <span>{r.percent_change}</span>}
-                    {r.market_sentiment && <span>{r.market_sentiment}</span>}
                     {r.has_merger_context && <span className="merger">merger context</span>}
                   </div>
                 </article>
@@ -96,7 +93,6 @@ export function MessageList({ messages, selectedMessageId, onSelectMessage, rend
         <b>{m.timestamp}</b>
         <span>{m.agent_label}</span>
         <span>{m.channel}</span>
-        <span>{m.message_type}</span>
         <span>{m.visibility}</span>
         {m.keyword_score > 0 && <span className="keyword-score">keyword score: {m.keyword_score}</span>}
         {m.is_merger_related && <span className="merger">content merger-related</span>}

@@ -269,7 +269,6 @@ summary { cursor: pointer; }
   opacity: .9; pointer-events: none; z-index: 2;
 }
 .tl-event-key { font-size: 11px; font-weight: 700; white-space: nowrap; }
-.tl-kbd-hint { margin-left: auto; font-size: 10.5px; color: #6f86a6; white-space: nowrap; cursor: help; }
 .bucket-head.has-marker { color: #fff; box-shadow: inset 0 -2px 0 var(--mk-color, #e24b4a); }
 .mk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   background: var(--mk-color, #e24b4a); margin-left: 3px; vertical-align: middle; }
@@ -505,7 +504,7 @@ summary { cursor: pointer; }
    ============================================ */
 .timeline-bar {
   background: #0c1422; border: 1px solid #1f3050; border-radius: 12px;
-  padding: 11px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;
+  padding: 7px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px;
   /* sayfa network'e kaydırılınca da timeline görünür kalsın (play + zaman akışı takibi) */
   position: sticky; top: 8px; z-index: 40;
   box-shadow: 0 6px 18px rgba(0,0,0,0.45);
@@ -514,12 +513,12 @@ summary { cursor: pointer; }
 .tl-play {
   display: inline-flex; align-items: center; gap: 6px; flex: none;
   background: rgba(55,138,221,0.14); color: #6cb0f5; border: 1px solid rgba(55,138,221,0.45);
-  border-radius: 9px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: 9px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
 }
 .tl-play:hover { background: rgba(55,138,221,0.22); }
 .tl-play.playing { background: rgba(226,75,74,0.16); color: #f0807f; border-color: rgba(226,75,74,0.45); }
-.tl-slider-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.tl-ticks { display: flex; align-items: flex-end; gap: 2px; height: 20px; }
+.tl-slider-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tl-ticks { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
 .tl-tick { flex: 1; min-width: 0; border: 0; padding: 0; border-radius: 1.5px; cursor: pointer; transition: opacity .12s; opacity: .55; }
 .tl-tick.in-range { opacity: .9; }
 .tl-tick:hover { opacity: 1; }
@@ -527,18 +526,18 @@ summary { cursor: pointer; }
 .tl-tick.start { outline: 1.5px solid rgba(34,197,94,0.85); outline-offset: 1px; }
 
 /* 1 本のトラックに 2 thumb を重ねた range slider */
-.tl-range-multi { position: relative; height: 20px; }
-.tl-track { position: absolute; top: 9px; left: 0; width: 100%; height: 4px; border-radius: 3px; background: #1b2a3f; }
-.tl-track-fill { position: absolute; top: 9px; height: 4px; border-radius: 3px;
+.tl-range-multi { position: relative; height: 16px; }
+.tl-track { position: absolute; top: 6px; left: 0; width: 100%; height: 4px; border-radius: 3px; background: #1b2a3f; }
+.tl-track-fill { position: absolute; top: 6px; height: 4px; border-radius: 3px;
   background: #22c55e; pointer-events: none; }
 .tl-range-multi input[type="range"] {
-  position: absolute; top: 0; left: 0; width: 100%; height: 20px; margin: 0;
+  position: absolute; top: 0; left: 0; width: 100%; height: 16px; margin: 0;
   -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none;
 }
-.tl-range-multi input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 20px; }
-.tl-range-multi input[type="range"]::-moz-range-track { background: transparent; height: 20px; }
+.tl-range-multi input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 16px; }
+.tl-range-multi input[type="range"]::-moz-range-track { background: transparent; height: 16px; }
 .tl-range-multi input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none; pointer-events: auto; margin-top: 3px;
+  -webkit-appearance: none; appearance: none; pointer-events: auto; margin-top: 1px;
   width: 14px; height: 14px; border-radius: 50%; cursor: grab; border: 2px solid #0b1220;
   box-shadow: 0 1px 3px rgba(0,0,0,.5);
 }
@@ -557,11 +556,8 @@ summary { cursor: pointer; }
 .tl-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-size: 12px; color: #8aa0bc; }
 .tl-meta .tl-round { font-weight: 700; color: #d7e1ee; }
 .tl-meta .tl-date { font-family: monospace; color: #aebfd4; }
-.tl-meta .tl-stock { font-family: monospace; color: #22d3ee; }
-.tl-meta .tl-sent { color: #c3cee0; text-transform: capitalize; }
 .tl-meta .tl-merger { color: #f0a07f; }
 .tl-meta .tl-off { color: #6f86a6; font-style: italic; }
-.tl-headline { font-size: 12.5px; color: #c9d6e6; line-height: 1.4; font-style: italic; }
 .time-inputs.disabled, .time-actions.disabled { opacity: .4; pointer-events: none; }
 
 @media (max-width: 760px) {
