@@ -7,6 +7,7 @@
 from typing import Any, Dict, List, Optional
 
 from .db import get_driver
+from .config import AGENT_VOCATIVE_PATTERNS
 from .domain import (
     normalize_message_types,
     normalize_text_sources,
@@ -215,11 +216,11 @@ def fetch_messages_for_edge(
 ):
     """
     Network の1本のedge（source agent -> target agent、channel別）の裏にある
-    実際のmessageを返す。/api/network の edge_query / ajay_query と同じ
+    実際のmessageを返す。/api/network の edge_query / mention_query と同じ
     マッチ条件を使い、集計せずmessageそのものを返す点だけが違う。
 
-    target_agent_id == 'ajay' の場合は reply graph ではなく、Ajay mention
-    ベースの inferred edge（/api/network の ajay_query）として扱う。
+    channel == 'mention' の場合は reply graph ではなく、content 冒頭の
+    名前呼びかけ（"Judge — ..." など）による mention edge として扱う。
     """
     selected_message_types = normalize_message_types(message_types, message_type)
     selected_text_sources = normalize_text_sources(text_sources)
@@ -238,16 +239,16 @@ def fetch_messages_for_edge(
         keyword=normalized_keyword,
     )
 
-    if target_agent_id == "ajay":
-        # Ajay は実データ上のAgentではない（mention-basedのinferred node）。
-        # source agentのmessageのうち、'ajay'を言及しているものを返す。
+    if channel == "mention":
+        # 名前呼びかけ (vocative) mention edge: source agent の message のうち、
+        # content 冒頭で target agent に名前で呼びかけているもの
+        # （/api/network の mention_query と同じ条件）。
+        params["vocative_pattern"] = AGENT_VOCATIVE_PATTERNS.get(target_agent_id, "a^")
         query = f"""
         MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
         WHERE a.agent_id = $source_agent_id
-          AND (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
-               OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
-               OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
-               OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
+          AND coalesce(m.content, '') =~ $vocative_pattern
+          AND NOT (m)-[:REPLIES_TO]->(:Message {{agent_id: $target_agent_id}})
           {common_where_clause()}
         WITH a, m, r, {keyword_score_expression()} AS keyword_score
         RETURN m.message_id AS message_id,

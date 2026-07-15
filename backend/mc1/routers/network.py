@@ -1,5 +1,5 @@
 # ============================================================
-# Network / Edge messages / Ajay timeline エンドポイント
+# Network / Edge messages エンドポイント
 # ============================================================
 
 from typing import Any, Dict, List, Optional
@@ -8,14 +8,13 @@ from fastapi import APIRouter, Query
 import numpy as np
 
 from ..db import get_driver
-from ..config import RECIPIENT_ROLE_TO_AGENT
+from ..config import RECIPIENT_ROLE_TO_AGENT, AGENT_VOCATIVE_PATTERNS
 from ..domain import (
     normalize_message_types,
     normalize_text_sources,
     common_where_clause,
     keyword_score_expression,
     combine_cell_texts,
-    extract_ajay_quotes,
 )
 from ..queries import fetch_all_rows, fetch_messages_for_edge
 from ..nlp import sentiment_score
@@ -34,7 +33,6 @@ def network(
     start_time: str = "",
     end_time: str = "",
     keyword: str = "",
-    include_ajay: bool = False,
 ):
     """
     agent間のcommunication network (reply graph) を返すAPI。
@@ -44,6 +42,8 @@ def network(
       message_types / time range) を反映する。
     - edge は responding_to に基づく reply graph（CrisisNet と同じ考え方）。
       返信した message の sender → 返信先 message の sender。
+    - それに加えて、content 冒頭の名前呼びかけ（"Judge — ..." / "@pr-intern: ..."）を
+      mention edge として返す（channel='mention'、破線で描画）。@ 無しの vocative も拾う。
     - node の message_count / sentiment / merger 数も、現在の filter を反映する。
     """
     selected_message_types = normalize_message_types(message_types, message_type)
@@ -92,6 +92,10 @@ def network(
     #   1. recipients listesinde agent'ın role token'ı geçen mesajlar
     #      (recipients JSON string olarak saklanır, ör. '["platform_trust"]')
     #   2. agent'ın bir mesajına REPLIES_TO ile bağlanan mesajlar
+    #   3. content'in başında agent'a isimle hitap eden mesajlar
+    #      (ör. "Judge — SaltWind published..." / "@pr-intern: stand by").
+    #      recipients=ALL + responding_to başka bir mesaj olsa bile bu bir
+    #      hitaptır; Judge'ın 6/5 17:00'te "susması" ancak böyle görünür.
     # Böylece "0 gönderdi ama N aldı" olan agent'lar network'ten düşmez;
     # frontend bunları 'silent/unresponsive' olarak işaretleyebilir.
     agent_role_tokens = {agent: role for role, agent in RECIPIENT_ROLE_TO_AGENT.items()}
@@ -102,12 +106,34 @@ def network(
       AND (
         m.recipients CONTAINS ('"' + coalesce($agent_role_tokens[a.agent_id], '__none__') + '"')
         OR (m)-[:REPLIES_TO]->(:Message {{agent_id: a.agent_id}})
+        OR coalesce(m.content, '') =~ coalesce($vocative_patterns[a.agent_id], 'a^')
       )
       {common_where_clause()}
     RETURN a.agent_id AS id,
            coalesce(a.agent_label, a.agent_id) AS label,
            count(DISTINCT m) AS received_count
     ORDER BY id
+    """
+
+    # ── 名前呼びかけ (vocative) mention edge ──
+    # netvis は今まで @role メンション（responding_to / recipients 経由）しか
+    # 認識していなかった。"Judge — SaltWind published..." のように content 冒頭で
+    # 名前で呼びかけるタイプの mention も edge にする（channel='mention'）。
+    # 既に reply edge として同じ target に繋がる message は二重計上しない。
+    mention_query = f"""
+    MATCH (sender:Agent)-[:SENT]->(m:Message)
+    MATCH (t:Agent)
+    WHERE sender.agent_id <> t.agent_id
+      AND coalesce(m.content, '') =~ coalesce($vocative_patterns[t.agent_id], 'a^')
+      AND NOT (m)-[:REPLIES_TO]->(:Message {{agent_id: t.agent_id}})
+      {common_where_clause()}
+    WITH sender.agent_id AS source, t.agent_id AS target,
+         count(m) AS message_count,
+         sum(CASE WHEN coalesce(m.is_merger_related, false)
+                   OR coalesce(m.internal_merger_related, false) THEN 1 ELSE 0 END) AS merger_related_count
+    RETURN source, target, 'mention' AS channel, message_count AS weight,
+           message_count AS message_count, merger_related_count AS merger_related_count
+    ORDER BY weight DESC
     """
 
     params = dict(
@@ -119,33 +145,19 @@ def network(
         end_time=end_time,
         keyword=normalized_keyword,
         agent_role_tokens=agent_role_tokens,
+        vocative_patterns=AGENT_VOCATIVE_PATTERNS,
     )
-
-    # ── 推論ノード "Ajay" ──
-    # Ajay はデータ上の agent ではなく、message 本文/内部思考で言及されるだけの人物。
-    # include_ajay=true のとき、各 agent の message のうち 'ajay' に言及したものを数え、
-    # agent -> ajay の inferred edge として返す（recipient 記録は存在しないため mention ベース）。
-    ajay_query = f"""
-    MATCH (a:Agent)-[:SENT]->(m:Message)
-    WHERE true
-      {common_where_clause()}
-      AND (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
-    WITH a.agent_id AS source,
-         count(m) AS weight,
-         sum(CASE WHEN coalesce(m.is_merger_related, false)
-                   OR coalesce(m.internal_merger_related, false) THEN 1 ELSE 0 END) AS merger_related_count
-    RETURN source, weight, merger_related_count
-    ORDER BY weight DESC
-    """
 
     with get_driver().session() as session:
         nodes = [dict(r) for r in session.run(node_query, **params)]
         edges = [dict(r) for r in session.run(edge_query, **params)]
         received_rows = [dict(r) for r in session.run(received_query, **params)]
-        ajay_rows = [dict(r) for r in session.run(ajay_query, **params)] if include_ajay else []
+        mention_rows = [dict(r) for r in session.run(mention_query, **params)]
+
+    # mention edge を通常 edge に追加（frontend は channel='mention' を破線で描く）
+    for r in mention_rows:
+        r["mention"] = True
+        edges.append(r)
 
     # received_count'u node'lara işle; hiç mesaj göndermemiş ama mesaj almış
     # agent'ları da (message_count=0) node olarak ekle ki network'ten kaybolmasınlar.
@@ -161,29 +173,6 @@ def network(
                 "message_count": 0,
                 "merger_related_count": 0,
                 "received_count": r["received_count"],
-            })
-
-    if include_ajay and ajay_rows:
-        total_mentions = sum(r["weight"] for r in ajay_rows)
-        total_merger = sum(r["merger_related_count"] for r in ajay_rows)
-        # inferred ノード（frontend で「データに無く後付け」と分かる印を付ける）
-        nodes.append({
-            "id": "ajay",
-            "label": "Ajay",
-            "message_count": total_mentions,
-            "merger_related_count": total_merger,
-            "bert_sentiment_score": None,
-            "inferred": True,
-        })
-        for r in ajay_rows:
-            edges.append({
-                "source": r["source"],
-                "target": "ajay",
-                "channel": "inferred",
-                "weight": r["weight"],
-                "message_count": r["weight"],
-                "merger_related_count": r["merger_related_count"],
-                "inferred": True,
             })
 
     # cellのsentiment同様、node単位のsentimentもBERTで計算する
@@ -329,80 +318,3 @@ def node_messages(
     with get_driver().session() as session:
         return [dict(r) for r in session.run(query, **params)]
 
-
-@router.get("/api/ajay-timeline")
-def ajay_timeline(
-    merger_only: bool = False,
-    message_types: Optional[list[str]] = Query(default=None),
-    message_type: str = "all",
-    text_sources: Optional[list[str]] = Query(default=None),
-    visibility: str = Query("all", pattern="^(all|internal|external)$"),
-    start_time: str = "",
-    end_time: str = "",
-    keyword: str = "",
-):
-    """
-    "Ajay's hints timeline" パネル用API。/api/network の ajay_query と同じ
-    マッチ条件（content / inner thoughtに'ajay'を含む）でmessageを集め、
-    集計せず時系列のmessage一覧として返す。各messageには heuristic に抽出した
-    引用フレーズ（ajay_quotes）を添えて、CEOが何をほのめかしていったかを
-    素早く拾い読みできるようにする。
-    """
-    selected_message_types = normalize_message_types(message_types, message_type)
-    selected_text_sources = normalize_text_sources(text_sources)
-    normalized_keyword = keyword.lower().strip()
-
-    query = f"""
-    MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
-    WHERE (toLower(coalesce(m.content, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_reacting, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_rationalizing, '')) CONTAINS 'ajay'
-           OR toLower(coalesce(m.internal_deliberating, '')) CONTAINS 'ajay')
-      {common_where_clause()}
-    WITH a, m, r, {keyword_score_expression()} AS keyword_score
-    RETURN m.message_id AS message_id,
-           m.comm_id AS comm_id,
-           m.timestamp_raw AS timestamp,
-           m.agent_id AS agent_id,
-           m.agent_role AS agent_role,
-           m.agent_label AS agent_label,
-           m.channel AS channel,
-           m.message_type AS message_type,
-           m.visibility AS visibility,
-           m.recipients AS recipients,
-           m.responding_to AS responding_to,
-           m.is_merger_related AS is_merger_related,
-           coalesce(m.internal_merger_related, false) AS internal_merger_related,
-           coalesce(m.internal_reacting_merger_related, false) AS internal_reacting_merger_related,
-           coalesce(m.internal_rationalizing_merger_related, false) AS internal_rationalizing_merger_related,
-           coalesce(m.internal_deliberating_merger_related, false) AS internal_deliberating_merger_related,
-           m.content AS content,
-           m.internal_reacting AS internal_reacting,
-           m.internal_rationalizing AS internal_rationalizing,
-           m.internal_deliberating AS internal_deliberating,
-           r.hour AS round_hour,
-           r.event_headline AS event_headline,
-           keyword_score AS keyword_score
-    ORDER BY timestamp
-    """
-    params = dict(
-        merger_only=merger_only,
-        message_types=selected_message_types,
-        text_sources=selected_text_sources,
-        visibility=visibility,
-        start_time=start_time,
-        end_time=end_time,
-        keyword=normalized_keyword,
-    )
-
-    with get_driver().session() as session:
-        rows = [dict(r) for r in session.run(query, **params)]
-
-    for row in rows:
-        row["ajay_quotes"] = extract_ajay_quotes(
-            row.get("content"),
-            row.get("internal_reacting"),
-            row.get("internal_rationalizing"),
-            row.get("internal_deliberating"),
-        )
-    return rows

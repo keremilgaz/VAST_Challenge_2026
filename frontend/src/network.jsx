@@ -31,10 +31,12 @@ const CHANNELS = {
   official_post:   { label: 'official_post', color: '#639922' },
   personal_post:   { label: 'personal_post', color: '#BA7517' },
   anonymous_post:  { label: 'anon_post',     color: '#E24B4A' },
+  // content 冒頭の名前呼びかけ（"Judge — ..." / "@pr-intern: ..."）による
+  // mention edge。reply ではないので破線 + アンバーで区別する。
+  mention:         { label: 'name mention',  color: '#c9a227' },
 };
-const INFERRED_COLOR = '#c9a227'; // 推論ノード/エッジ（Ajay）用のアンバー
-const channelColor = (ch) => ch === 'inferred' ? INFERRED_COLOR : (CHANNELS[ch]?.color || '#5A7A9A');
-const channelLabel = (ch) => ch === 'inferred' ? 'Ajay mention' : (CHANNELS[ch]?.label || (ch || 'other'));
+const channelColor = (ch) => CHANNELS[ch]?.color || '#5A7A9A';
+const channelLabel = (ch) => CHANNELS[ch]?.label || (ch || 'other');
 
 // CrisisNet と同じ初期座標
 const NP = {
@@ -45,7 +47,6 @@ const NP = {
   pr_agent:           { x: 525, y: 432 },
   pr_intern_agent:    { x: 298, y: 458 },
   intern_agent:       { x: 135, y: 335 },
-  ajay:               { x: 360, y: 46 },   // データに無い推論ノード（上部中央＝外部の権威として）
 };
 
 const W = 720;
@@ -169,16 +170,16 @@ export default function NetworkVisualization({
     //      (ör. merger-only'de hiç merger mesajı olmayan agent görünmez)    → ↩ chip
     // Bu yüzden reply sayısını görünen link'lerden değil, backend'in döndürdüğü
     // HAM edge listesinden (rawEdges) hesaplıyoruz.
+    // mention edge (channel='mention') reply değildir; reply sayımına katılmaz.
     const repliesVisibleBySource = {};
     links.forEach(e => {
-      if (!e.inferred) repliesVisibleBySource[e.source] = (repliesVisibleBySource[e.source] || 0) + (e.weight || 0);
+      if (e.channel !== 'mention') repliesVisibleBySource[e.source] = (repliesVisibleBySource[e.source] || 0) + (e.weight || 0);
     });
     const repliesAllBySource = {};
     rawEdges.forEach(e => {
-      if (!e.inferred) repliesAllBySource[e.source] = (repliesAllBySource[e.source] || 0) + (e.weight || 0);
+      if (e.channel !== 'mention') repliesAllBySource[e.source] = (repliesAllBySource[e.source] || 0) + (e.weight || 0);
     });
     nodes.forEach(n => {
-      if (n.inferred) { n.replies_sent = 0; n.hidden_replies = 0; n.broadcast_count = 0; return; }
       const all = repliesAllBySource[n.id] || 0;
       const vis = repliesVisibleBySource[n.id] || 0;
       n.replies_sent = vis;                                            // edge olarak çizilen reply'lar
@@ -192,7 +193,7 @@ export default function NetworkVisualization({
     // GÖNDERMİYOR (message_count === 0). Backend artık bu node'ları da
     // döndürüyor; burada işaretleyip kırmızı uyarı ring'i + chip ile çiziyoruz.
     nodes.forEach(n => {
-      n.silent = !n.inferred && (n.message_count || 0) === 0 && (n.received_count || 0) > 0;
+      n.silent = (n.message_count || 0) === 0 && (n.received_count || 0) > 0;
     });
 
     // ── 有向グラフ用の offset 計算 ──
@@ -255,9 +256,9 @@ export default function NetworkVisualization({
     edgeSel.classed('selected', e => selectedEdge === edgeKey(e));
     edgeSel.select('.edge-glow').style('stroke', e => channelColor(e.channel))
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
-    // inferred（Ajay 言及）エッジは破線で「実データの reply ではない」と分かるようにする
+    // mention エッジは破線で「実データの reply ではない」と分かるようにする
     edgeSel.select('.edge-path').style('stroke', e => channelColor(e.channel))
-      .style('stroke-dasharray', e => e.inferred ? '6 4' : null)
+      .style('stroke-dasharray', e => e.channel === 'mention' ? '6 4' : null)
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
     edgeSel.select('.edge-arrow').style('fill', e => channelColor(e.channel));
     edgeSel.select('.edge-hit')
@@ -268,10 +269,10 @@ export default function NetworkVisualization({
       .on('mouseenter', function (ev, e) {
         const fa = AGENTS[e.source]?.label || e.source;
         const ta = AGENTS[e.target]?.label || e.target;
-        if (e.inferred) {
-          showTT(ev, `<div class="tt-name" style="color:${INFERRED_COLOR}">${fa} &rarr; Ajay</div>
-            <div class="tt-row"><span class="tt-k">Inferred</span><span class="tt-v">mention-based</span></div>
-            <div class="tt-row"><span class="tt-k">Ajay mentions</span><span class="tt-v">${e.weight}</span></div>
+        if (e.channel === 'mention') {
+          showTT(ev, `<div class="tt-name" style="color:${channelColor('mention')}">${fa} &rarr; ${ta}</div>
+            <div class="tt-row"><span class="tt-k">Type</span><span class="tt-v">name mention ("${ta} — ...")</span></div>
+            <div class="tt-row"><span class="tt-k">Mentions</span><span class="tt-v">${e.weight}</span></div>
             <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${e.merger_related_count}</span></div>`);
           return;
         }
@@ -299,9 +300,9 @@ export default function NetworkVisualization({
     // ── NODES ──
     const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
     // silent node: içi boş (koyu) bırakılır — "burada olması gerekirdi ama ses yok" hissi
-    const nodeFill = (d) => (d.inferred || d.silent) ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0'));
-    const nodeStroke = (d) => d.inferred ? INFERRED_COLOR : (AGENTS[d.id]?.color || '#888');
-    const abbrColor = (d) => d.inferred ? INFERRED_COLOR : (d.silent ? (AGENTS[d.id]?.color || '#888') : (isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333')));
+    const nodeFill = (d) => d.silent ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0'));
+    const nodeStroke = (d) => AGENTS[d.id]?.color || '#888';
+    const abbrColor = (d) => d.silent ? (AGENTS[d.id]?.color || '#888') : (isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333'));
 
     const rankById = {};
     (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
@@ -347,16 +348,14 @@ export default function NetworkVisualization({
     nodeSel.select('.n-silent-txt').style('display', d => d.silent ? null : 'none')
       .text(d => d.silent ? `⚠ ${d.received_count} in · 0 out` : '');
     nodeSel.select('.n-ring').attr('stroke', nodeStroke);
-    nodeSel.select('.n-glow').attr('fill', nodeStroke).style('display', d => (d.inferred || d.silent) ? 'none' : null);
-    // inferred ノード（Ajay）は塗りを破線リングで描いて「データに無く後付け」と分かるようにする
+    nodeSel.select('.n-glow').attr('fill', nodeStroke).style('display', d => d.silent ? 'none' : null);
     nodeSel.select('.n-circle').attr('stroke', nodeStroke)
-      .attr('stroke-dasharray', d => d.inferred ? '5 3' : null)
       .transition().duration(DUR).attr('fill', nodeFill);
-    nodeSel.select('.n-inner').attr('fill', nodeStroke).style('display', d => (d.inferred || d.silent) ? 'none' : null);
+    nodeSel.select('.n-inner').attr('fill', nodeStroke).style('display', d => d.silent ? 'none' : null);
     nodeSel.select('.n-abbr').attr('fill', abbrColor).text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2).toUpperCase());
-    nodeSel.select('.n-label').text(d => d.inferred ? `${d.label} (inferred — not in data)` : (d.silent ? `${d.label} (unresponsive)` : d.label));
-    // inferred / silent ラベルは常時表示
-    nodeSel.select('.n-label').filter(d => d.inferred || d.silent).attr('opacity', 1);
+    nodeSel.select('.n-label').text(d => d.silent ? `${d.label} (unresponsive)` : d.label);
+    // silent ラベルは常時表示
+    nodeSel.select('.n-label').filter(d => d.silent).attr('opacity', 1);
     nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
     nodeSel.select('.n-badge-txt').text(d => d.message_count);
     nodeSel.select('.n-bc-rect').attr('stroke', nodeStroke)
@@ -401,7 +400,7 @@ export default function NetworkVisualization({
         // 再実行されない）。ref から最新値を読む。
         const selNow = selectedNodeRef.current;
         if (!selNow) clearHighlight(); else highlightNode(selNow);
-        if (d.id !== selNow && !d.inferred && !d.silent) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
+        if (d.id !== selNow && !d.silent) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
       });
     // 新規 node だけ fade in
     nodeEnter.transition().duration(DUR).style('opacity', 1)
@@ -522,7 +521,7 @@ export default function NetworkVisualization({
     nodeSel
       .classed('selected', d => d.id === selectedNode)
       .each(function (d) {
-        d3.select(this).select('.n-label').attr('opacity', (d.inferred || d.silent || d.id === selectedNode) ? 1 : 0);
+        d3.select(this).select('.n-label').attr('opacity', (d.silent || d.id === selectedNode) ? 1 : 0);
       });
     // 選択が変わったら dim/highlight も即時反映する。
     // （以前は次の data 再描画までノード選択のハイライトが更新されないバグがあった）
@@ -555,8 +554,7 @@ export default function NetworkVisualization({
     channelTotals[ch] = (channelTotals[ch] || 0) + (e.weight || 0);
   });
   const legendChannels = Object.keys(CHANNELS).filter(ch => channelTotals[ch] > 0);
-  const hasInferred = (data?.edges || []).some(e => e.inferred) || (data?.nodes || []).some(n => n.inferred);
-  const hasSilent = (data?.nodes || []).some(n => !n.inferred && (n.message_count || 0) === 0 && (n.received_count || 0) > 0);
+  const hasSilent = (data?.nodes || []).some(n => (n.message_count || 0) === 0 && (n.received_count || 0) > 0);
 
   return (
     <div className="net-wrap">
@@ -568,19 +566,17 @@ export default function NetworkVisualization({
           ● badge = msgs sent · ◌ = non-reply · ↩ = reply, partner hidden
         </span>
         {legendChannels.length > 0 ? legendChannels.map(ch => (
-          <span className="nl-item" key={ch}>
-            <span className="nl-line" style={{ background: channelColor(ch) }} /> {channelLabel(ch)}
+          <span className="nl-item" key={ch}
+            title={ch === 'mention' ? 'Dashed edge: the sender addresses this agent by name at the start of the message text ("Judge — ...", "@pr-intern: ..."), without it being a reply. Not a reply edge — inferred from message content.' : undefined}>
+            {ch === 'mention'
+              ? <span className="nl-line nl-dash" style={{ color: channelColor(ch) }} />
+              : <span className="nl-line" style={{ background: channelColor(ch) }} />} {channelLabel(ch)}
             <span className="nl-cnt">{channelTotals[ch]}</span>
           </span>
         )) : <span className="nl-item">Edge color = channel · node size = messages · hover for name</span>}
         {hasSilent && (
           <span className="nl-item nl-silent" title="This agent is addressed / replied to in the current time window but sends zero messages — it has gone silent (unresponsive). The red pulsing ring marks it; ⚠ chip shows incoming count.">
             <span className="nl-dot" style={{ borderColor: '#e24b4a' }} /> ⚠ unresponsive = receives msgs, sends none
-          </span>
-        )}
-        {hasInferred && (
-          <span className="nl-item" title="Ajay is not an agent in the data — only mentioned in messages. Dashed = inferred from mentions.">
-            <span className="nl-line nl-dash" style={{ color: INFERRED_COLOR }} /> Ajay (inferred — not in data)
           </span>
         )}
       </div>

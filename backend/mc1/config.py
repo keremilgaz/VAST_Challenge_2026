@@ -50,6 +50,34 @@ RECIPIENT_ROLE_TO_AGENT = {
 }
 
 
+# ============================================================
+# 名前呼びかけ (vocative) mention 検出パターン
+# ============================================================
+# netvis はこれまで @role メンション（responding_to / recipients）しか認識して
+# いなかったが、message content の冒頭で名前だけで呼びかけるケースがある:
+#   "Judge — SaltWind published the merger. ..."   (#803, 6/5 17:01)
+#   "Legal, can you confirm ..."
+# これらも「その agent に宛てた message」として network に反映するための
+# 正規表現（Neo4j `=~` 用 = Java regex、文字列全体にマッチさせる）。
+# ルール: content 先頭（任意の空白後）に、@付き or 素の名前 → 区切り記号
+# （— – : , - --）→ 空白、と続くものだけを vocative とみなす。
+# 区切りの後に空白を要求することで "pr-intern" 冒頭の "pr" などへの誤マッチを防ぐ。
+def _vocative_pattern(*aliases: str) -> str:
+    alt = "|".join(aliases)
+    return rf"(?is)^\s*@?(?:{alt})\s*(?:—|–|::?|,|-{{1,2}})\s.*"
+
+
+AGENT_VOCATIVE_PATTERNS = {
+    "legal_agent": _vocative_pattern("legal"),
+    "pr_agent": _vocative_pattern("pr"),
+    "quality_agent": _vocative_pattern("platform_trust", "platform-trust", "platform trust"),
+    "social_media_agent": _vocative_pattern("social_manager", "social-manager", "social manager"),
+    "pr_intern_agent": _vocative_pattern("pr_intern", "pr-intern"),
+    "intern_agent": _vocative_pattern("intern"),
+    "judge_agent": _vocative_pattern("judge"),
+}
+
+
 # market_snapshot.sentiment のラベルを可視化用の数値(-1〜1)に変換するマップ。
 # JSON内のmarket sentiment labelをそのまま使い、BERTでは再計算しない。
 SENTIMENT_LABEL_TO_VALUE = {

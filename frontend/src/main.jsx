@@ -9,7 +9,7 @@
 //   components/Collapsible.jsx              … 折りたたみ
 //   components/CrisisTimeline.jsx           … 危機タイムライン slider
 //   components/StockSentimentLineChart.jsx  … 株価/センチメント折れ線
-//   components/messagePanels.jsx            … メッセージ一覧/詳細/関連/会話フロー/Ajayタイムライン
+//   components/messagePanels.jsx            … メッセージ一覧/詳細/関連/会話フロー
 // このファイルには App（全体の状態管理とレイアウト）だけを残している。ロジックは不変。
 // ============================================
 
@@ -31,7 +31,7 @@ import { SequentialFlow } from './components/SequentialFlow.jsx';
 import { SEQ_EVENTS, MERGER_KEYWORDS } from './constants.js';
 import { loadCommIdMap } from './commIdMap.js';
 import {
-  MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal, AjayTimelineModal,
+  MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal,
 } from './components/messagePanels.jsx';
 
 
@@ -53,7 +53,6 @@ function App() {
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages', edgeWeight: 'weight' });
   const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
-  const [showAjay, setShowAjay] = useState(false); // データに無い推論ノード "Ajay"（mention ベース）を表示するか
   // network の挙動を決める2つの独立したtoggle（以前は1つの3値 networkMode に
   // 詰め込んでいたが、"filterの出所"と"time windowの出所"は別々の軸なので分離した）。
   //   netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか
@@ -67,14 +66,9 @@ function App() {
   const [nodeMessages, setNodeMessages] = useState([]);
   const [isNodeDetailCollapsed, setIsNodeDetailCollapsed] = useState(false);
   // ---- network edge click → Edge Messages Panel ----
-  const [selectedEdge, setSelectedEdge] = useState(null); // { key, source, target, sourceLabel, targetLabel, channel, inferred }
+  const [selectedEdge, setSelectedEdge] = useState(null); // { key, source, target, sourceLabel, targetLabel, channel, mention }
   const [edgeMessages, setEdgeMessages] = useState([]);
   const [isEdgeDetailCollapsed, setIsEdgeDetailCollapsed] = useState(false);
-
-  // ---- Ajay's hints timeline (modal) ----
-  const [ajayTimelineOpen, setAjayTimelineOpen] = useState(false);
-  const [ajayTimelineMessages, setAjayTimelineMessages] = useState([]);
-  const [ajayTimelineStatus, setAjayTimelineStatus] = useState(''); // '', 'loading', 'error'
 
   // network専用 filter（heatmapの計算には一切影響させない。networkだけに適用する）
   const [netCombos, setNetCombos] = useState([]);
@@ -199,12 +193,11 @@ function App() {
       if (netStartTime) p.set('start_time', inputValueToApiTime(netStartTime));
       if (netEndTime) p.set('end_time', inputValueToApiTime(netEndTime));
     }
-    if (showAjay) p.set('include_ajay', 'true');
     return p.toString();
   }, [granularity, netMirrorsHeatmap, netFollowsTimeline,
       mergerOnly, selectedCombos, selectedTextSources, searchKeyword,
       netMergerOnly, netCombos, netStartTime, netEndTime,
-      timelineStart, timelineEnd, showAjay]);
+      timelineStart, timelineEnd]);
 
   // ============================================
   // データ取得
@@ -289,10 +282,9 @@ function App() {
   useEffect(() => { loadNetwork(); }, [loadNetwork]);
 
   // Seçili node'un tüm gönderdiği mesajları getir (edge'i olmayan broadcast/root
-  // mesajlar dahil — bunlar edge tıklamasıyla görülemiyordu). Ajay gerçek bir
-  // agent olmadığı için onun yerine "Ajay's hints timeline" kullanılır.
+  // mesajlar dahil — bunlar edge tıklamasıyla görülemiyordu).
   useEffect(() => {
-    if (!selectedNetworkNode || selectedNetworkNode === 'ajay') { setNodeMessages([]); return; }
+    if (!selectedNetworkNode) { setNodeMessages([]); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -531,7 +523,6 @@ function App() {
     setNetFollowsTimeline(false);
     setNetworkSort({ nodeSize: 'messages', edgeWeight: 'weight' });
     setColorBySentiment(false);
-    setShowAjay(false);
     setNetMergerOnly(false);
     setNetCombos([]);
     setNetAgentFilter([]);
@@ -595,14 +586,14 @@ function App() {
 
   const selectEdge = useCallback(async (edge) => {
     const sourceLabel = AGENTS[edge.source]?.label || edge.source;
-    const targetLabel = edge.inferred ? 'Ajay' : (AGENTS[edge.target]?.label || edge.target);
+    const targetLabel = AGENTS[edge.target]?.label || edge.target;
     const key = `${edge.source}>${edge.target}>${edge.channel}`;
     setSelectedEdge({
       key,
       source: edge.source,
       target: edge.target,
       channel: edge.channel,
-      inferred: !!edge.inferred,
+      mention: edge.channel === 'mention',
       sourceLabel,
       targetLabel,
     });
@@ -615,7 +606,7 @@ function App() {
     const p = new URLSearchParams(networkQuery);
     p.set('source', edge.source);
     p.set('target', edge.target);
-    if (!edge.inferred) p.set('channel', edge.channel || '');
+    p.set('channel', edge.channel || '');
 
     try {
       const res = await fetch(`${API}/api/edge-messages?${p.toString()}`);
@@ -623,24 +614,6 @@ function App() {
     } catch (e) {
       setEdgeMessages([]);
       setStatus('Could not load edge messages (is the backend running?).');
-    }
-  }, [networkQuery]);
-
-  // ============================================
-  // "Ajay's hints timeline" — Ajayを言及するmessageを時系列で開く
-  // 現在のnetwork filter（networkQuery）をそのまま使う。
-  // ============================================
-  const openAjayTimeline = useCallback(async () => {
-    setAjayTimelineOpen(true);
-    setAjayTimelineStatus('loading');
-    try {
-      const res = await fetch(`${API}/api/ajay-timeline?${networkQuery}`);
-      if (!res.ok) throw new Error(`ajay-timeline ${res.status}`);
-      setAjayTimelineMessages(await res.json());
-      setAjayTimelineStatus('');
-    } catch (e) {
-      setAjayTimelineMessages([]);
-      setAjayTimelineStatus('error');
     }
   }, [networkQuery]);
 
@@ -722,8 +695,7 @@ function App() {
   const displayNetwork = useMemo(() => {
     if (netMirrorsHeatmap || !netAgentFilter.length) return network;
     const keep = new Set(netAgentFilter);
-    // inferred ノード（Ajay）は agent filter から除外しない
-    const nodes = (network.nodes || []).filter(n => keep.has(n.id) || n.inferred);
+    const nodes = (network.nodes || []).filter(n => keep.has(n.id));
     const keepIds = new Set(nodes.map(n => n.id));
     const edges = (network.edges || []).filter(e => keepIds.has(e.source) && keepIds.has(e.target));
     return { ...network, nodes, edges };
@@ -1239,17 +1211,9 @@ function App() {
               <div className="heatmap-title">
                 <div className="nv-head-left">
                   <h2>Communication network (reply graph)</h2>
-                  <span className="muted small">{(displayNetwork.nodes || []).filter(n => !n.inferred).length} agents{(displayNetwork.nodes || []).some(n => n.inferred) ? ' + Inferred Ajay (CEO of TenantThread) node' : ''} · {displayNetwork.edges?.length || 0} edges</span>
+                  <span className="muted small">{(displayNetwork.nodes || []).length} agents · {displayNetwork.edges?.length || 0} edges</span>
                 </div>
                 <div className="nv-head-right">
-                  <label className="check ajay-toggle" title="Add 'Ajay' as an inferred node — Ajay is NOT in the data, only mentioned in messages. Edges = how often each agent mentions Ajay (in content + inner thoughts). Shown with a dashed/marked style.">
-                    <input type="checkbox" checked={showAjay} onChange={e => setShowAjay(e.target.checked)} />
-                    Inferred Ajay (CEO of TenantThread) node
-                  </label>
-                  <button type="button" className="ajay-hints-btn" onClick={openAjayTimeline}
-                    title="Ajay is never the sender of a message — he's only quoted or referenced inside other agents' messages/inner thoughts. This opens those mentions in chronological order so you can read what he actually hinted at, instead of just a mention count.">
-                    Ajay (CEO of TenantThread) hints timeline
-                  </button>
                   <div className="netmode-toggles" role="group" aria-label="Network mode">
                     <label className="check netmode-toggle" title="Filters, sort order and node size come from the heatmap's own settings instead of network's own filters.">
                       <input type="checkbox" checked={netMirrorsHeatmap} onChange={e => setNetMirrorsHeatmap(e.target.checked)} />
@@ -1318,7 +1282,7 @@ function App() {
 
               {/* ---- Node Messages Panel: seçili node'un TÜM mesajları
                    (broadcast/root dahil — edge tıklamasıyla erişilemeyenler) ---- */}
-              {selectedNetworkNode && selectedNetworkNode !== 'ajay' && (
+              {selectedNetworkNode && (
                 <NodeMessagesPanel
                   node={{ id: selectedNetworkNode, label: AGENTS[selectedNetworkNode]?.label || selectedNetworkNode }}
                   messages={nodeMessages}
@@ -1348,18 +1312,6 @@ function App() {
         </section>
       )}
       </div>
-
-      {/* AjayTimelineModal を先に描画: メッセージをクリックすると selectMessage が
-          ConversationFlowModal を開くので、後から描画する ConversationFlowModal が
-          常にその上に重なるようにする（同じ overlay の二重表示で隠れないように）。 */}
-      <AjayTimelineModal
-        open={ajayTimelineOpen}
-        messages={ajayTimelineMessages}
-        status={ajayTimelineStatus}
-        onClose={() => setAjayTimelineOpen(false)}
-        selectedMessageId={selectedMessageId}
-        onSelectMessage={selectMessage}
-      />
 
       <ConversationFlowModal
         open={flowOpen}

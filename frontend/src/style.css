@@ -106,11 +106,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .seg-btn:disabled { cursor: not-allowed; }
 /* vertical stack variant: each option on its own full-width row (no text overlap in narrow sidebar) */
 .nv-head-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
-.ajay-toggle { font-size: 12px; color: #d8c074; white-space: nowrap; }
-.ajay-hints-btn { background: transparent; border: 1px solid #c9a227; color: #d8c074; border-radius: 9px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-.ajay-hints-btn:hover { background: rgba(201, 162, 39, 0.14); }
-.ajay-quotes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.ajay-quote-chip { background: rgba(201, 162, 39, 0.12); border: 1px solid rgba(201, 162, 39, 0.5); color: #e8d090; border-radius: 8px; padding: 3px 9px; font-size: 12px; font-style: italic; }
 .net-legend .nl-line.nl-dash { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px); }
 .netmode-toggles { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
 .netmode-toggle { font-size: 12px; white-space: nowrap; }

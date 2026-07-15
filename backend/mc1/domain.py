@@ -3,7 +3,7 @@
 # ============================================================
 # 旧 main.py の「DBに触らない純粋関数」と Cypher の共通句ビルダーを集約したモジュール。
 # 会話リンク解決 (resolve_parent_links) / merger・keyword フィルタ句 / text source 正規化 /
-# time bucket 式 / market sentiment 変換 / Ajay 引用抽出 などが含まれる。ロジックは不変。
+# time bucket 式 / market sentiment 変換 などが含まれる。ロジックは不変。
 
 import json
 import re
@@ -404,30 +404,3 @@ def market_sentiment_to_value(label: Optional[str]) -> Optional[float]:
     if not label:
         return None
     return SENTIMENT_LABEL_TO_VALUE.get(label.strip().lower())
-
-
-# ============================================================
-# Ajay's hints timeline: 引用フレーズ抽出
-# ============================================================
-# Ajay はデータ上のAgentではなく、他agentのmessage/内部思考に引用・言及される
-# だけの人物（CEO）。'ajay' を含むmessageから引用符付きのフレーズを抜き出し、
-# 時系列で読めるようにする。
-#
-# 二重引用符で囲まれた4〜240文字のフレーズを拾う。厳密な帰属判定ではなく
-# （どの引用符がAjayの発言かをNLPで判定してはいない）、"ajayを含むmessageの中で
-# 引用されている文言" を素早く拾い読みするための heuristic。本文全体も
-# 別途表示されるので、誤って無関係な引用を拾っても実害は小さい。
-_QUOTE_SPAN_PATTERN = re.compile(r'"([^"]{4,240})"')
-
-
-def extract_ajay_quotes(*texts: str) -> List[str]:
-    """'ajay' を含むtext群から引用符付きフレーズを抽出する（重複除去・出現順）。"""
-    quotes: List[str] = []
-    for t in texts:
-        if not t:
-            continue
-        for m in _QUOTE_SPAN_PATTERN.finditer(t):
-            q = m.group(1).strip()
-            if q and q not in quotes:
-                quotes.append(q)
-    return quotes

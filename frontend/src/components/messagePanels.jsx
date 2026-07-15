@@ -2,7 +2,7 @@
 // メッセージ表示系コンポーネント群
 // ============================================
 // Heatmap / Network の両方で共有するメッセージパネル・関連メッセージ・会話フロー・
-// Ajay タイムラインのモーダルをまとめたモジュール。旧 main.jsx から一切変更せず移動。
+// メッセージ関連パネルをまとめたモジュール。旧 main.jsx から移動。
 import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatRecipients } from '../utils.js';
@@ -140,7 +140,7 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
   if (!selectedEdge) {
     return <div className="detail-card empty"><span className="muted">Click a network edge to see the messages behind that connection here.</span></div>;
   }
-  const { sourceLabel, targetLabel, channel, inferred } = selectedEdge;
+  const { sourceLabel, targetLabel, channel, mention } = selectedEdge;
   return (
     <div className="detail-card">
       <div className="detail-summary" onClick={() => setCollapsed(c => !c)}>
@@ -148,8 +148,8 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
           {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>
         <div className="ds-text">
-          <b>{sourceLabel}</b> {inferred ? 'mentions' : '→'} <b>{targetLabel}</b>
-          {!inferred && <><span className="ds-pipe">|</span> {channel}</>}
+          <b>{sourceLabel}</b> {mention ? 'addresses by name' : '→'} <b>{targetLabel}</b>
+          {!mention && <><span className="ds-pipe">|</span> {channel}</>}
           <span className="ds-pipe">|</span> {messages.length} messages
         </div>
         <span className="ds-hint">{collapsed ? 'Expand messages' : 'Collapse'}</span>
@@ -404,50 +404,6 @@ export function ConversationFlowModal({ open, context, status, selectedMessageId
 
         <div className="flow-list">
           {!loading && !errored && thread.map(item => renderBubble(item))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
-// Ajay's hints timeline (modal) — Ajayは実データ上のAgentではなく、
-// 他agentのmessage/内部思考の中で引用・言及されるだけの人物（CEO）。
-// mention数の集計ではなく、実際に何と言われたかを時系列で読めるようにする。
-// ============================================
-export function AjayTimelineModal({ open, messages, status, onClose, selectedMessageId, onSelectMessage }) {
-  if (!open) return null;
-  return (
-    <div className="flow-overlay" onClick={onClose}>
-      <div className="flow-modal" onClick={e => e.stopPropagation()}>
-        <div className="flow-modal-head">
-          <div>
-            <h3>Ajay (CEO of TenantThread) hints timeline</h3>
-            <div className="flow-sub">
-              Ajay never sends a message himself — these are the messages where other agents
-              quote or refer to him, in chronological order · {messages.length} message{messages.length === 1 ? '' : 's'}
-            </div>
-          </div>
-          <button className="flow-close" onClick={onClose}>✕</button>
-        </div>
-
-        {status === 'loading' && <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Loading…</p>}
-        {status === 'error' && <p className="muted" style={{ padding: '8px 4px 8px 16px' }}>Could not load Ajay's timeline (is the backend running?).</p>}
-        {status === '' && messages.length === 0 && (
-          <p className="muted" style={{ padding: '8px 16px' }}>No messages mention Ajay under the current filters.</p>
-        )}
-
-        <div className="flow-list">
-          <MessageList
-            messages={messages}
-            selectedMessageId={selectedMessageId}
-            onSelectMessage={onSelectMessage}
-            renderExtra={(m) => (m.ajay_quotes && m.ajay_quotes.length > 0) ? (
-              <div className="ajay-quotes">
-                {m.ajay_quotes.map((q, i) => <span className="ajay-quote-chip" key={i}>&ldquo;{q}&rdquo;</span>)}
-              </div>
-            ) : null}
-          />
         </div>
       </div>
     </div>
