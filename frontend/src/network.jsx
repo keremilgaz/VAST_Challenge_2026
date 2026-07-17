@@ -12,15 +12,19 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
-// CrisisNet と同じ agent config（fill は dark 背景で映える明るい pastel）
+// Agent config. Node'lar tek renk (gri) çizilir — tutor önerisi: agent'lar
+// renkle değil, konum + kısaltma + etiketle ayırt edilsin, renk kanalı
+// edge'lere (message channel) kalsın. color/fill artık NODE_COLOR/NODE_FILL.
+export const NODE_COLOR = '#8b95a5'; // tüm node'lar için ortak gri (ring / badge / abbr)
+export const NODE_FILL  = '#e2e7ee'; // ortak açık gri dolgu
 export const AGENTS = {
-  legal_agent:        { label: 'Legal-Agent',    abbr: 'LA', color: '#D85A30', fill: '#FAECE7', seniority: 'Senior' },
-  quality_agent:      { label: 'Platform-Trust', abbr: 'PT', color: '#7F77DD', fill: '#EEEDFE', seniority: 'Senior' },
-  social_media_agent: { label: 'Social-Manager', abbr: 'SM', color: '#639922', fill: '#EAF3DE', seniority: 'Senior' },
-  judge_agent:        { label: 'Judge',          abbr: 'J',  color: '#1D9E75', fill: '#E1F5EE', seniority: 'Compliance' },
-  pr_agent:           { label: 'PR-Agent',       abbr: 'PR', color: '#BA7517', fill: '#FAEEDA', seniority: 'Senior' },
-  pr_intern_agent:    { label: 'PR-Intern',      abbr: 'PI', color: '#D4537E', fill: '#FBEAF0', seniority: 'Junior' },
-  intern_agent:       { label: 'Intern',         abbr: 'IN', color: '#888780', fill: '#F1EFE8', seniority: 'Junior' },
+  legal_agent:        { label: 'Legal-Agent',    abbr: 'LA', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Senior' },
+  quality_agent:      { label: 'Platform-Trust', abbr: 'PT', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Senior' },
+  social_media_agent: { label: 'Social-Manager', abbr: 'SM', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Senior' },
+  judge_agent:        { label: 'Judge',          abbr: 'J',  color: NODE_COLOR, fill: NODE_FILL, seniority: 'Compliance' },
+  pr_agent:           { label: 'PR-Agent',       abbr: 'PR', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Senior' },
+  pr_intern_agent:    { label: 'PR-Intern',      abbr: 'PI', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Junior' },
+  intern_agent:       { label: 'Intern',         abbr: 'IN', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Junior' },
 };
 
 // CrisisNet と同じ channel 色（edge を channel ごとに色分け）
@@ -32,25 +36,31 @@ const CHANNELS = {
   personal_post:   { label: 'personal_post', color: '#BA7517' },
   anonymous_post:  { label: 'anon_post',     color: '#E24B4A' },
   // content 冒頭の名前呼びかけ（"Judge — ..." / "@pr-intern: ..."）による
-  // mention edge。reply ではないので破線 + アンバーで区別する。
-  mention:         { label: 'name mention',  color: '#c9a227' },
+  // mention edge。reply ではないので破線で区別する。色はメッセージの
+  // channel（via_channel）に従う — legend 用の色はニュートラルなグレー。
+  mention:         { label: 'name mention',  color: '#8aa0bc' },
 };
-const channelColor = (ch) => CHANNELS[ch]?.color || '#5A7A9A';
+export const channelColor = (ch) => CHANNELS[ch]?.color || '#5A7A9A';
 const channelLabel = (ch) => CHANNELS[ch]?.label || (ch || 'other');
+// edge の描画色: mention edge は「そのメッセージが流れた channel」の色
+// （via_channel、backend が返す）。それ以外は channel の色そのまま。
+const edgeColor = (e) => (e.channel === 'mention'
+  ? channelColor(e.via_channel || 'unknown')
+  : channelColor(e.channel));
 
 // CrisisNet と同じ初期座標
 const NP = {
-  legal_agent:        { x: 220, y: 165 },
-  quality_agent:      { x: 490, y: 138 },
-  social_media_agent: { x: 595, y: 298 },
-  judge_agent:        { x: 378, y: 290 },
-  pr_agent:           { x: 525, y: 432 },
-  pr_intern_agent:    { x: 298, y: 458 },
-  intern_agent:       { x: 135, y: 335 },
+  legal_agent:        { x: 220, y: 132 },
+  quality_agent:      { x: 490, y: 110 },
+  social_media_agent: { x: 595, y: 238 },
+  judge_agent:        { x: 378, y: 232 },
+  pr_agent:           { x: 525, y: 345 },
+  pr_intern_agent:    { x: 298, y: 366 },
+  intern_agent:       { x: 135, y: 268 },
 };
 
 const W = 720;
-const H = 540;
+const H = 430;
 
 function nodeRadius(value, maxValue) {
   const v = Math.max(0, value || 0);
@@ -147,7 +157,7 @@ export default function NetworkVisualization({
     });
 
     if (layout === 'circle') {
-      const cx = W / 2, cy = H / 2, R = 200;
+      const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 65;
       nodes.forEach((n, i) => {
         const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
         n.x = cx + Math.cos(ang) * R; n.y = cy + Math.sin(ang) * R;
@@ -239,8 +249,9 @@ export default function NetworkVisualization({
       edgeSel.classed('dimmed', false).classed('highlighted', false);
     }
 
-    // ── EDGES: keyed join（key = source>target>channel）──
-    const edgeKey = e => `${e.source}>${e.target}>${e.channel}`;
+    // ── EDGES: keyed join（key = source>target>channel[>via_channel]）──
+    // mention edge channel別に bölündüğü için via_channel da key'e girer.
+    const edgeKey = e => `${e.source}>${e.target}>${e.channel}${e.via_channel ? '>' + e.via_channel : ''}`;
     const edgeData = gEdges.selectAll('g.net-edge').data(links, edgeKey);
     edgeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
     const edgeEnter = edgeData.enter().append('g').attr('class', 'net-edge').style('opacity', 0);
@@ -254,13 +265,14 @@ export default function NetworkVisualization({
 
     const edgeSel = edgeEnter.merge(edgeData);
     edgeSel.classed('selected', e => selectedEdge === edgeKey(e));
-    edgeSel.select('.edge-glow').style('stroke', e => channelColor(e.channel))
+    edgeSel.select('.edge-glow').style('stroke', e => edgeColor(e))
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
     // mention エッジは破線で「実データの reply ではない」と分かるようにする
-    edgeSel.select('.edge-path').style('stroke', e => channelColor(e.channel))
+    // （色は via_channel = メッセージの channel の色）
+    edgeSel.select('.edge-path').style('stroke', e => edgeColor(e))
       .style('stroke-dasharray', e => e.channel === 'mention' ? '6 4' : null)
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
-    edgeSel.select('.edge-arrow').style('fill', e => channelColor(e.channel));
+    edgeSel.select('.edge-arrow').style('fill', e => edgeColor(e));
     edgeSel.select('.edge-hit')
       .on('click', function (ev, e) {
         ev.stopPropagation();
@@ -270,8 +282,9 @@ export default function NetworkVisualization({
         const fa = AGENTS[e.source]?.label || e.source;
         const ta = AGENTS[e.target]?.label || e.target;
         if (e.channel === 'mention') {
-          showTT(ev, `<div class="tt-name" style="color:${channelColor('mention')}">${fa} &rarr; ${ta}</div>
+          showTT(ev, `<div class="tt-name" style="color:${edgeColor(e)}">${fa} &rarr; ${ta}</div>
             <div class="tt-row"><span class="tt-k">Type</span><span class="tt-v">name mention ("${ta} — ...")</span></div>
+            <div class="tt-row"><span class="tt-k">Channel</span><span class="tt-v">${channelLabel(e.via_channel || 'unknown')}</span></div>
             <div class="tt-row"><span class="tt-k">Mentions</span><span class="tt-v">${e.weight}</span></div>
             <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${e.merger_related_count}</span></div>`);
           return;
@@ -300,9 +313,11 @@ export default function NetworkVisualization({
     // ── NODES ──
     const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
     // silent node: içi boş (koyu) bırakılır — "burada olması gerekirdi ama ses yok" hissi
-    const nodeFill = (d) => d.silent ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : (AGENTS[d.id]?.fill || '#dfe7f0'));
-    const nodeStroke = (d) => AGENTS[d.id]?.color || '#888';
-    const abbrColor = (d) => d.silent ? (AGENTS[d.id]?.color || '#888') : (isSentiment ? '#0a0f16' : (AGENTS[d.id]?.color || '#333'));
+    // Tüm node'lar tek renk (gri): ring/badge = NODE_COLOR, dolgu = NODE_FILL.
+    // abbr açık gri dolgu üzerinde okunaklı olsun diye koyu.
+    const nodeFill = (d) => d.silent ? '#161d2b' : (isSentiment ? sentimentColor(d.bert_sentiment_score) : NODE_FILL);
+    const nodeStroke = () => NODE_COLOR;
+    const abbrColor = (d) => d.silent ? NODE_COLOR : (isSentiment ? '#0a0f16' : '#3a4452');
 
     const rankById = {};
     (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
@@ -380,8 +395,7 @@ export default function NetworkVisualization({
     nodeSel
       .on('click', (ev, n) => { ev.stopPropagation(); onSelectNode && onSelectNode(n.id); })
       .on('mouseenter', function (ev, n) {
-        const a = AGENTS[n.id] || {};
-        showTT(ev, `<div class="tt-name" style="color:${a.color || '#fff'}">${n.label}</div>
+        showTT(ev, `<div class="tt-name" style="color:#dfe7f0">${n.label}</div>
           ${n.silent ? `<div class="tt-row"><span class="tt-k" style="color:#e24b4a">⚠ UNRESPONSIVE</span><span class="tt-v" style="color:#ff8a80">receives, never replies</span></div>` : ''}
           <div class="tt-row"><span class="tt-k">Messages sent</span><span class="tt-v">${n.message_count}</span></div>
           <div class="tt-row"><span class="tt-k">Messages received (addressed/replied to)</span><span class="tt-v">${n.received_count ?? 0}</span></div>
@@ -440,14 +454,14 @@ export default function NetworkVisualization({
         g.select('.edge-arrow').attr('d', gm.arrow);
         const txt = String(e.weight);
         const rw = txt.length * 7 + 8;
-        const col = channelColor(e.channel);
+        const col = edgeColor(e);
         const lbl = g.select('.net-edge-lbl');
         lbl.select('rect').attr('x', gm.lx - rw / 2).attr('y', gm.ly - 7).attr('width', rw)
           .attr('stroke', col).attr('stroke-opacity', 0.3).attr('stroke-width', 0.5);
         lbl.select('text').attr('x', gm.lx).attr('y', gm.ly + 4).attr('fill', col).text(txt);
       });
       nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
-      nodeSel.select('.n-label').attr('y', d => d.y > 380 ? -d.r - 9 : d.r + 16);
+      nodeSel.select('.n-label').attr('y', d => d.y > H - 160 ? -d.r - 9 : d.r + 16);
       nodeSel.select('.n-badge-rect').each(function (d) {
         const bw = String(d.message_count).length * 7 + 12;
         d3.select(this).attr('width', bw).attr('x', d.r - 2).attr('y', -d.r + 2 - 9);
@@ -483,12 +497,12 @@ export default function NetworkVisualization({
         if (!d.silent) return;
         const t = `⚠ ${d.received_count} in · 0 out`;
         const bw = t.length * 6.5 + 10;
-        const top = d.y > 380 ? d.r + 8 : d.r + 21; // label üstteyse chip node'a yakın durabilir
+        const top = d.y > H - 160 ? d.r + 8 : d.r + 21; // label üstteyse chip node'a yakın durabilir
         d3.select(this).attr('width', bw).attr('x', -bw / 2).attr('y', top);
       });
       nodeSel.select('.n-silent-txt').each(function (d) {
         if (!d.silent) return;
-        const top = d.y > 380 ? d.r + 8 : d.r + 21;
+        const top = d.y > H - 160 ? d.r + 8 : d.r + 21;
         d3.select(this).attr('x', 0).attr('y', top + 10.5);
       });
       nodeSel.select('.n-abbr').attr('y', d => Math.max(9, Math.round(d.r * 0.56)) * 0.4);
@@ -544,7 +558,7 @@ export default function NetworkVisualization({
   useEffect(() => {
     const svg = d3.select(svgRef.current);
     svg.selectAll('g.net-edge')
-      .classed('selected', d => `${d.source}>${d.target}>${d.channel}` === selectedEdge);
+      .classed('selected', d => `${d.source}>${d.target}>${d.channel}${d.via_channel ? '>' + d.via_channel : ''}` === selectedEdge);
   }, [selectedEdge, data]);
 
   // 現在の edges に存在する channel を legend 用に集計
@@ -567,10 +581,10 @@ export default function NetworkVisualization({
         </span>
         {legendChannels.length > 0 ? legendChannels.map(ch => (
           <span className="nl-item" key={ch}
-            title={ch === 'mention' ? 'Dashed edge: the sender addresses this agent by name at the start of the message text ("Judge — ...", "@pr-intern: ..."), without it being a reply. Not a reply edge — inferred from message content.' : undefined}>
+            title={ch === 'mention' ? 'Dashed edge: the sender addresses this agent by name at the start of the message text ("Judge — ...", "@pr-intern: ..."), without it being a reply. Dash = mention; the color follows the message channel it was sent on.' : undefined}>
             {ch === 'mention'
               ? <span className="nl-line nl-dash" style={{ color: channelColor(ch) }} />
-              : <span className="nl-line" style={{ background: channelColor(ch) }} />} {channelLabel(ch)}
+              : <span className="nl-line" style={{ background: channelColor(ch) }} />} {ch === 'mention' ? 'name mention (color = channel)' : channelLabel(ch)}
             <span className="nl-cnt">{channelTotals[ch]}</span>
           </span>
         )) : <span className="nl-item">Edge color = channel · node size = messages · hover for name</span>}

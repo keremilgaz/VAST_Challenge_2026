@@ -16,7 +16,7 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RefreshCcw, Play, Pause } from 'lucide-react';
-import NetworkVisualization, { AGENTS } from './network.jsx';
+import NetworkVisualization, { AGENTS, channelColor } from './network.jsx';
 import './style.css';
 
 import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL, EVENT_MARKERS } from './constants.js';
@@ -586,12 +586,14 @@ function App() {
   const selectEdge = useCallback(async (edge) => {
     const sourceLabel = AGENTS[edge.source]?.label || edge.source;
     const targetLabel = AGENTS[edge.target]?.label || edge.target;
-    const key = `${edge.source}>${edge.target}>${edge.channel}`;
+    // mention edge'ler channel başına bölündüğü için key'e via_channel da girer.
+    const key = `${edge.source}>${edge.target}>${edge.channel}${edge.via_channel ? '>' + edge.via_channel : ''}`;
     setSelectedEdge({
       key,
       source: edge.source,
       target: edge.target,
       channel: edge.channel,
+      via_channel: edge.via_channel || '',
       mention: edge.channel === 'mention',
       sourceLabel,
       targetLabel,
@@ -606,6 +608,7 @@ function App() {
     p.set('source', edge.source);
     p.set('target', edge.target);
     p.set('channel', edge.channel || '');
+    if (edge.via_channel) p.set('via_channel', edge.via_channel);
 
     try {
       const res = await fetch(`${API}/api/edge-messages?${p.toString()}`);
@@ -1066,10 +1069,11 @@ function App() {
               <div className="fp-body">
                 <div className="muted small">These filters apply to the network only — they don't change heatmap calculations.</div>
 
-                <Collapsible title="Network filters" defaultOpen={true}>
+                {/* Heatmap filtre paneliyle aynı yapı: her filtre kendi Collapsible
+                    başlığının altında, tıklayınca açılır (⑤). */}
+                <Collapsible title="Message channel" defaultOpen={false}>
                   {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — these network filters are taken from the heatmap.</div>}
                   <div className={netMirrorsHeatmap ? 'disabled' : ''}>
-                  <div className="control-title">Message channel</div>
                   <label className="check select-all-row"><input type="checkbox" checked={netCombos.length === 0} onChange={() => setNetCombos([])} /> All</label>
                   {combosByGroup.external.length > 0 && (
                     <div className="type-group">
@@ -1079,7 +1083,10 @@ function App() {
                       </label>
                       <div className="type-grid indent">
                         {combosByGroup.external.map(c => (
-                          <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
+                          <label className="check" key={`net-${c.key}`}>
+                            <input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} />
+                            <span className="edge-swatch" style={{ background: channelColor(c.channel) }} /> {c.label}
+                          </label>
                         ))}
                       </div>
                     </div>
@@ -1092,18 +1099,27 @@ function App() {
                       </label>
                       <div className="type-grid indent">
                         {combosByGroup.internal.map(c => (
-                          <label className="check" key={`net-${c.key}`}><input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} /> {c.label}</label>
+                          <label className="check" key={`net-${c.key}`}>
+                            <input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} />
+                            <span className="edge-swatch" style={{ background: channelColor(c.channel) }} /> {c.label}
+                          </label>
                         ))}
                       </div>
                     </div>
                   )}
-                  <div className="control-title">Agent type</div>
+                  <div className="muted small" style={{ marginTop: 6 }}>Swatch = edge color of this channel in the graph.</div>
+                  </div>
+                </Collapsible>
+
+                <Collapsible title="Agent type" defaultOpen={false}>
+                  {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — taken from the heatmap.</div>}
+                  <div className={netMirrorsHeatmap ? 'disabled' : ''}>
                   <label className="check select-all-row"><input type="checkbox" checked={netAgentFilter.length === 0} onChange={() => setNetAgentFilter([])} /> All</label>
                   <div className="type-grid">
                     {(options.agents || []).map(a => (
                       <label className="check" key={`net-a-${a.agent_id}`}>
                         <input type="checkbox" checked={isInSet(netAgentFilter, a.agent_id)} onChange={() => toggleNetAgent(a.agent_id)} />
-                        <span className="agent-dot" style={{ background: AGENTS[a.agent_id]?.color || '#888' }} /> {a.agent_label}
+                        {a.agent_label}
                       </label>
                     ))}
                   </div>
@@ -1182,7 +1198,7 @@ function App() {
                     if (!n) return <div className="muted small">No data.</div>;
                     return (
                       <div className="node-detail">
-                        <div className="nd-name" style={{ color: AGENTS[n.id]?.color }}>{n.label}</div>
+                        <div className="nd-name">{n.label}</div>
                         <div className="nd-row"><span>Messages</span><b>{n.message_count}</b></div>
                         <div className="nd-row"><span>Merger-related</span><b>{n.merger_related_count}</b></div>
                         <div className="nd-row"><span>BERT sentiment</span><b>{n.bert_sentiment_score == null ? '—' : n.bert_sentiment_score.toFixed(2)}</b></div>

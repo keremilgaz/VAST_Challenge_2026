@@ -92,6 +92,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: #378ADD; cursor: poi
 .type-group .group-head { font-size: 13px; font-weight: 600; }
 .type-grid.indent { margin: 4px 0 2px 18px; }
 .agent-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+/* network filter panelinde channel → edge rengi göstergesi (küçük çizgi) */
+.edge-swatch { display: inline-block; width: 14px; height: 4px; border-radius: 2px; flex: none; }
 .time-inputs { display: flex; flex-direction: column; gap: 8px; }
 .time-inputs input { width: 100%; }
 .time-actions { display: flex; gap: 8px; }
@@ -288,7 +290,7 @@ summary { cursor: pointer; }
   color: #9fb2c8; border: 1px dashed #46587a; border-radius: 7px;
   padding: 1px 7px; margin-bottom: 4px; cursor: help;
 }
-.net-svg { width: 100%; height: auto; background: #07101E; border: 1px solid #1A2840; border-radius: 12px; display: block; cursor: grab; }
+.net-svg { width: 100%; height: auto; max-height: 56vh; background: #07101E; border: 1px solid #1A2840; border-radius: 12px; display: block; cursor: grab; }
 .net-svg:active { cursor: grabbing; }
 
 /* cleaner CrisisNet-style tooltip */

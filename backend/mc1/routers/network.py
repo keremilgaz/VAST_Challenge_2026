@@ -120,6 +120,8 @@ def network(
     # 認識していなかった。"Judge — SaltWind published..." のように content 冒頭で
     # 名前で呼びかけるタイプの mention も edge にする（channel='mention'）。
     # 既に reply edge として同じ target に繋がる message は二重計上しない。
+    # mention edge de mesajın gerçek channel'ına göre bölünür (via_channel):
+    # frontend kesikli çizgiyi via_channel'ın rengiyle boyar.
     mention_query = f"""
     MATCH (sender:Agent)-[:SENT]->(m:Message)
     MATCH (t:Agent)
@@ -128,10 +130,11 @@ def network(
       AND NOT (m)-[:REPLIES_TO]->(:Message {{agent_id: t.agent_id}})
       {common_where_clause()}
     WITH sender.agent_id AS source, t.agent_id AS target,
+         coalesce(m.channel, 'unknown') AS via_channel,
          count(m) AS message_count,
          sum(CASE WHEN coalesce(m.is_merger_related, false)
                    OR coalesce(m.internal_merger_related, false) THEN 1 ELSE 0 END) AS merger_related_count
-    RETURN source, target, 'mention' AS channel, message_count AS weight,
+    RETURN source, target, 'mention' AS channel, via_channel, message_count AS weight,
            message_count AS message_count, merger_related_count AS merger_related_count
     ORDER BY weight DESC
     """
@@ -220,6 +223,7 @@ def edge_messages(
     source: str,
     target: str,
     channel: str = "",
+    via_channel: str = "",
     merger_only: bool = False,
     message_types: Optional[list[str]] = Query(default=None),
     message_type: str = "all",
@@ -238,6 +242,7 @@ def edge_messages(
         source_agent_id=source,
         target_agent_id=target,
         channel=channel,
+        via_channel=via_channel,
         merger_only=merger_only,
         message_types=message_types,
         message_type=message_type,
