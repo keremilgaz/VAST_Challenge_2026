@@ -27,26 +27,32 @@ export const AGENTS = {
   intern_agent:       { label: 'Intern',         abbr: 'IN', color: NODE_COLOR, fill: NODE_FILL, seniority: 'Junior' },
 };
 
-// CrisisNet と同じ channel 色（edge を channel ごとに色分け）
+// Edge (channel) renkleri.
+// External post channel'ları (official/personal/anonymous_post) hiçbir zaman
+// direct edge üretmez (recipients boş, responding_to yok — veride doğrulandı),
+// bu yüzden onlara renk ayırmıyoruz. Boşalan belirgin renkler gerçekten edge
+// üreten channel'lara dağıtıldı ve comms_huddle, message_type'a göre
+// broadcast / action olarak iki ayrı renge bölündü.
 const CHANNELS = {
-  comms_huddle:    { label: 'comms_huddle',  color: '#378ADD' },
-  one_on_one_chat: { label: 'one_on_one',    color: '#7F77DD' },
-  side_huddle:     { label: 'side_huddle',   color: '#1D9E75' },
-  official_post:   { label: 'official_post', color: '#639922' },
-  personal_post:   { label: 'personal_post', color: '#BA7517' },
-  anonymous_post:  { label: 'anon_post',     color: '#E24B4A' },
+  'comms_huddle|broadcast': { label: 'comms_huddle (broadcast)', color: '#378ADD' }, // mavi
+  'comms_huddle|action':    { label: 'comms_huddle (action)',    color: '#BA7517' }, // turuncu
+  one_on_one_chat:          { label: 'one_on_one',               color: '#E24B4A' }, // kırmızı (en belirgin)
+  side_huddle:              { label: 'side_huddle',              color: '#1D9E75' }, // teal
   // content 冒頭の名前呼びかけ（"Judge — ..." / "@pr-intern: ..."）による
   // mention edge。reply ではないので破線で区別する。色はメッセージの
   // channel（via_channel）に従う — legend 用の色はニュートラルなグレー。
-  mention:         { label: 'name mention',  color: '#8aa0bc' },
+  mention:                  { label: 'name mention',             color: '#8aa0bc' },
 };
-export const channelColor = (ch) => CHANNELS[ch]?.color || '#5A7A9A';
-const channelLabel = (ch) => CHANNELS[ch]?.label || (ch || 'other');
+// comms_huddle は message_type (broadcast/action) ile renklenir; mention için
+// via_channel'ın message_type'ı yok → generic comms_huddle = broadcast mavisi.
+const colorKeyOf = (ch, mt) => (ch === 'comms_huddle' ? `comms_huddle|${mt || 'broadcast'}` : ch);
+export const channelColor = (ch, mt) => CHANNELS[colorKeyOf(ch, mt)]?.color || '#5A7A9A';
+const channelLabel = (ch, mt) => CHANNELS[colorKeyOf(ch, mt)]?.label || (ch || 'other');
 // edge の描画色: mention edge は「そのメッセージが流れた channel」の色
-// （via_channel、backend が返す）。それ以外は channel の色そのまま。
+// （via_channel、backend が返す）。それ以外は channel + message_type の色。
 const edgeColor = (e) => (e.channel === 'mention'
   ? channelColor(e.via_channel || 'unknown')
-  : channelColor(e.channel));
+  : channelColor(e.channel, e.message_type));
 
 // CrisisNet と同じ初期座標
 const NP = {
@@ -249,9 +255,10 @@ export default function NetworkVisualization({
       edgeSel.classed('dimmed', false).classed('highlighted', false);
     }
 
-    // ── EDGES: keyed join（key = source>target>channel[>via_channel]）──
+    // ── EDGES: keyed join（key = source>target>channel[>message_type][>via_channel]）──
+    // comms_huddle broadcast/action ayrı edge'ler olduğundan message_type da key'e girer;
     // mention edge channel別に bölündüğü için via_channel da key'e girer.
-    const edgeKey = e => `${e.source}>${e.target}>${e.channel}${e.via_channel ? '>' + e.via_channel : ''}`;
+    const edgeKey = e => `${e.source}>${e.target}>${e.channel}${e.message_type ? '>' + e.message_type : ''}${e.via_channel ? '>' + e.via_channel : ''}`;
     const edgeData = gEdges.selectAll('g.net-edge').data(links, edgeKey);
     edgeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
     const edgeEnter = edgeData.enter().append('g').attr('class', 'net-edge').style('opacity', 0);
@@ -289,8 +296,8 @@ export default function NetworkVisualization({
             <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${e.merger_related_count}</span></div>`);
           return;
         }
-        showTT(ev, `<div class="tt-name" style="color:${channelColor(e.channel)}">${fa} &rarr; ${ta}</div>
-          <div class="tt-row"><span class="tt-k">Channel</span><span class="tt-v">${channelLabel(e.channel)}</span></div>
+        showTT(ev, `<div class="tt-name" style="color:${edgeColor(e)}">${fa} &rarr; ${ta}</div>
+          <div class="tt-row"><span class="tt-k">Channel</span><span class="tt-v">${channelLabel(e.channel, e.message_type)}</span></div>
           <div class="tt-row"><span class="tt-k">Replies</span><span class="tt-v">${e.weight}</span></div>
           <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${e.merger_related_count}</span></div>`);
       })
@@ -558,14 +565,14 @@ export default function NetworkVisualization({
   useEffect(() => {
     const svg = d3.select(svgRef.current);
     svg.selectAll('g.net-edge')
-      .classed('selected', d => `${d.source}>${d.target}>${d.channel}${d.via_channel ? '>' + d.via_channel : ''}` === selectedEdge);
+      .classed('selected', d => `${d.source}>${d.target}>${d.channel}${d.message_type ? '>' + d.message_type : ''}${d.via_channel ? '>' + d.via_channel : ''}` === selectedEdge);
   }, [selectedEdge, data]);
 
-  // 現在の edges に存在する channel を legend 用に集計
+  // 現在の edges に存在する channel（+ comms_huddle は message_type 別）を legend 用に集計
   const channelTotals = {};
   (data?.edges || []).forEach(e => {
-    const ch = e.channel || 'unknown';
-    channelTotals[ch] = (channelTotals[ch] || 0) + (e.weight || 0);
+    const key = e.channel === 'mention' ? 'mention' : colorKeyOf(e.channel || 'unknown', e.message_type);
+    channelTotals[key] = (channelTotals[key] || 0) + (e.weight || 0);
   });
   const legendChannels = Object.keys(CHANNELS).filter(ch => channelTotals[ch] > 0);
   const hasSilent = (data?.nodes || []).some(n => (n.message_count || 0) === 0 && (n.received_count || 0) > 0);

@@ -136,7 +136,9 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
   if (!selectedEdge) {
     return <div className="detail-card empty"><span className="muted">Click a network edge to see the messages behind that connection here.</span></div>;
   }
-  const { sourceLabel, targetLabel, channel, mention } = selectedEdge;
+  const { sourceLabel, targetLabel, channel, message_type: messageType, mention } = selectedEdge;
+  // comms_huddle broadcast/action ayrı edge'ler — başlıkta message_type'ı da göster.
+  const channelText = channel === 'comms_huddle' && messageType ? `${channel} (${messageType})` : channel;
   return (
     <div className="detail-card">
       <div className="detail-summary" onClick={() => setCollapsed(c => !c)}>
@@ -145,7 +147,7 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
         </button>
         <div className="ds-text">
           <b>{sourceLabel}</b> {mention ? 'addresses by name' : '→'} <b>{targetLabel}</b>
-          {!mention && <><span className="ds-pipe">|</span> {channel}</>}
+          {!mention && <><span className="ds-pipe">|</span> {channelText}</>}
           <span className="ds-pipe">|</span> {messages.length} messages
         </div>
         <span className="ds-hint">{collapsed ? 'Expand messages' : 'Collapse'}</span>

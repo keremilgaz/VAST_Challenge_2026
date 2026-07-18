@@ -69,16 +69,19 @@ def network(
     # エッジ（reply graph: m(filter後) -REPLIES_TO-> target、両方の sender を結ぶ）
     # CrisisNet と同様、返信した message の channel ごとに edge を分割する
     # （channel 別の色付き parallel edge を frontend で描けるようにする）。
+    # channel に加えて message_type でも分割する: comms_huddle は broadcast / action の
+    # 2種類の reply を持ち、frontend が別色で描き分けられるようにするため。
     edge_query = f"""
     MATCH (sender:Agent)-[:SENT]->(m:Message)-[:REPLIES_TO]->(target:Message)<-[:SENT]-(targetAgent:Agent)
     WHERE sender.agent_id <> targetAgent.agent_id
       {common_where_clause()}
     WITH sender.agent_id AS source, targetAgent.agent_id AS target,
          coalesce(m.channel, 'unknown') AS channel,
+         coalesce(m.message_type, '') AS message_type,
          count(m) AS message_count,
          sum(CASE WHEN coalesce(m.is_merger_related, false)
                    OR coalesce(m.internal_merger_related, false) THEN 1 ELSE 0 END) AS merger_related_count
-    RETURN source, target, channel, message_count AS weight,
+    RETURN source, target, channel, message_type, message_count AS weight,
            message_count AS message_count, merger_related_count AS merger_related_count
     ORDER BY weight DESC
     """
@@ -223,6 +226,7 @@ def edge_messages(
     source: str,
     target: str,
     channel: str = "",
+    edge_message_type: str = "",
     via_channel: str = "",
     merger_only: bool = False,
     message_types: Optional[list[str]] = Query(default=None),
@@ -242,6 +246,7 @@ def edge_messages(
         source_agent_id=source,
         target_agent_id=target,
         channel=channel,
+        edge_message_type=edge_message_type,
         via_channel=via_channel,
         merger_only=merger_only,
         message_types=message_types,

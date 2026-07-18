@@ -22,7 +22,7 @@ import './style.css';
 import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL, EVENT_MARKERS } from './constants.js';
 import {
   shortBucket, countColor, sentimentCellColor,
-  apiTimeToInputValue, inputValueToApiTime, fmtSigned, fmtRoundLabel, timeToBucket,
+  fmtSigned, fmtRoundLabel, timeToBucket,
 } from './utils.js';
 import { Collapsible } from './components/Collapsible.jsx';
 import { CrisisTimeline } from './components/CrisisTimeline.jsx';
@@ -50,16 +50,12 @@ function App() {
 
   // ---- network固有 state ----
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
-  const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages', edgeWeight: 'weight' });
+  const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages' });
   const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
-  // network の挙動を決める2つの独立したtoggle（以前は1つの3値 networkMode に
-  // 詰め込んでいたが、"filterの出所"と"time windowの出所"は別々の軸なので分離した）。
-  //   netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか
-  //   netFollowsTimeline: time window を crisis timeline から取るか、network自前の手動範囲にするか
-  // 2つは互いに独立 — 4つの組み合わせすべてが有効（例: heatmapのfilterを使いつつ、
-  // timeとは別に自分でtime rangeを指定する、なども可能）。
+  // netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか。
+  // Time window は常に crisis timeline に追従する（network専用の手動 time range は廃止 —
+  // timeline bar が唯一の時間コントロール）。
   const [netMirrorsHeatmap, setNetMirrorsHeatmap] = useState(false);
-  const [netFollowsTimeline, setNetFollowsTimeline] = useState(false);
   const [selectedNetworkNode, setSelectedNetworkNode] = useState(null);
   // ---- node click → Node Messages Panel (broadcast/root mesajlar dahil) ----
   const [nodeMessages, setNodeMessages] = useState([]);
@@ -73,8 +69,6 @@ function App() {
   const [netCombos, setNetCombos] = useState([]);
   const [netMergerOnly, setNetMergerOnly] = useState(false);
   const [netAgentFilter, setNetAgentFilter] = useState([]); // 空=All（client側でnode絞り込み）
-  const [netStartTime, setNetStartTime] = useState('');
-  const [netEndTime, setNetEndTime] = useState('');
 
   // 左パネル全体の開閉
   // 左サイドバー（heatmap filters + network controls）を一括で開閉する。
@@ -177,25 +171,18 @@ function App() {
       selectedTextSources.forEach(s => p.append('text_sources', s));
       if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
     } else {
-      // 'independent' / 'timeline': network 専用 filter を使う。
+      // 'independent': network 専用 filter を使う。
       p.set('merger_only', netMergerOnly ? 'true' : 'false');
       netCombos.forEach(t => p.append('message_types', t));
     }
 
-    // --- time window ---
-    if (netFollowsTimeline) {
-      // 'timeline' / 'heatmap': crisis timeline の窓に追従する（play で animate）。
-      if (timelineStart) p.set('start_time', timelineStart);
-      if (timelineEnd) p.set('end_time', timelineEnd);
-    } else {
-      // 'independent': network 専用の手動 time range（未設定なら全期間）。
-      if (netStartTime) p.set('start_time', inputValueToApiTime(netStartTime));
-      if (netEndTime) p.set('end_time', inputValueToApiTime(netEndTime));
-    }
+    // --- time window: 常に crisis timeline の窓に追従する（play で animate）---
+    if (timelineStart) p.set('start_time', timelineStart);
+    if (timelineEnd) p.set('end_time', timelineEnd);
     return p.toString();
-  }, [granularity, netMirrorsHeatmap, netFollowsTimeline,
+  }, [granularity, netMirrorsHeatmap,
       mergerOnly, selectedCombos, selectedTextSources, searchKeyword,
-      netMergerOnly, netCombos, netStartTime, netEndTime,
+      netMergerOnly, netCombos,
       timelineStart, timelineEnd]);
 
   // ============================================
@@ -504,8 +491,6 @@ function App() {
     });
   };
   const toggleNetAgent = (id) => toggleInSet(setNetAgentFilter, agentIds(), id);
-  const useFullNetTimeRange = () => { setNetStartTime(apiTimeToInputValue(options.min_time)); setNetEndTime(apiTimeToInputValue(options.max_time)); };
-  const clearNetTimeRange = () => { setNetStartTime(''); setNetEndTime(''); };
 
   // すべての filter を既定値に戻す（view mode = granularity / heatmap mode / layout /
   // node-edge metric は「絞り込み」ではないので保持する）。
@@ -519,14 +504,11 @@ function App() {
     setHeatmapSort({ key: 'agent_id', dir: 'asc' });
     // network filters
     setNetMirrorsHeatmap(false);
-    setNetFollowsTimeline(false);
-    setNetworkSort({ nodeSize: 'messages', edgeWeight: 'weight' });
+    setNetworkSort({ nodeSize: 'messages' });
     setColorBySentiment(false);
     setNetMergerOnly(false);
     setNetCombos([]);
     setNetAgentFilter([]);
-    setNetStartTime('');
-    setNetEndTime('');
     // crisis timeline → 全期間に戻す
     setPlaying(false);
     setTimelineStartIdx(0);
@@ -586,13 +568,15 @@ function App() {
   const selectEdge = useCallback(async (edge) => {
     const sourceLabel = AGENTS[edge.source]?.label || edge.source;
     const targetLabel = AGENTS[edge.target]?.label || edge.target;
-    // mention edge'ler channel başına bölündüğü için key'e via_channel da girer.
-    const key = `${edge.source}>${edge.target}>${edge.channel}${edge.via_channel ? '>' + edge.via_channel : ''}`;
+    // comms_huddle broadcast/action ayrı edge'ler olduğundan message_type,
+    // mention edge'ler channel başına bölündüğü için via_channel da key'e girer.
+    const key = `${edge.source}>${edge.target}>${edge.channel}${edge.message_type ? '>' + edge.message_type : ''}${edge.via_channel ? '>' + edge.via_channel : ''}`;
     setSelectedEdge({
       key,
       source: edge.source,
       target: edge.target,
       channel: edge.channel,
+      message_type: edge.message_type || '',
       via_channel: edge.via_channel || '',
       mention: edge.channel === 'mention',
       sourceLabel,
@@ -608,6 +592,7 @@ function App() {
     p.set('source', edge.source);
     p.set('target', edge.target);
     p.set('channel', edge.channel || '');
+    if (edge.message_type) p.set('edge_message_type', edge.message_type);
     if (edge.via_channel) p.set('via_channel', edge.via_channel);
 
     try {
@@ -1081,11 +1066,14 @@ function App() {
                         <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.external)} onChange={() => toggleNetGroup(combosByGroup.external)} />
                         External <span className="muted small">(public-facing)</span>
                       </label>
+                      {/* External post'lar recipients'sız public post — reply edge üretmezler,
+                          bu yüzden edge rengi yok (renkler edge üreten internal channel'lara ayrıldı). */}
+                      <div className="muted small indent">Public posts have no recipients, so they never appear as edges — no edge color.</div>
                       <div className="type-grid indent">
                         {combosByGroup.external.map(c => (
                           <label className="check" key={`net-${c.key}`}>
                             <input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} />
-                            <span className="edge-swatch" style={{ background: channelColor(c.channel) }} /> {c.label}
+                            {c.label}
                           </label>
                         ))}
                       </div>
@@ -1101,7 +1089,7 @@ function App() {
                         {combosByGroup.internal.map(c => (
                           <label className="check" key={`net-${c.key}`}>
                             <input type="checkbox" checked={isNetComboActive(c.key)} onChange={() => toggleNetCombo(c.key)} />
-                            <span className="edge-swatch" style={{ background: channelColor(c.channel) }} /> {c.label}
+                            <span className="edge-swatch" style={{ background: channelColor(c.channel, c.message_type) }} /> {c.label}
                           </label>
                         ))}
                       </div>
@@ -1158,13 +1146,7 @@ function App() {
                         onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
                     ))}
                   </div>
-                  <div className="control-title">Edge width</div>
-                  <div className={`seg seg-stack ${netMirrorsHeatmap ? 'disabled' : ''}`}>
-                    {[['weight', 'Reply count'], ['merger', 'Merger-related count']].map(([v, l]) => (
-                      <button key={v} className={`seg-btn ${networkSort.edgeWeight === v ? 'on' : ''}`} disabled={netMirrorsHeatmap}
-                        onClick={() => setNetworkSort(s => ({ ...s, edgeWeight: v }))}>{l}</button>
-                    ))}
-                  </div>
+                  {/* Edge width は常に Reply count（選択肢は不要と判断し削除） */}
                   <label className={`check ${netMirrorsHeatmap ? 'disabled' : ''}`} style={{ marginTop: 6 }}>
                     <input type="checkbox" checked={colorBySentiment} disabled={netMirrorsHeatmap}
                       onChange={e => setColorBySentiment(e.target.checked)} />
@@ -1172,24 +1154,10 @@ function App() {
                   </label>
                 </Collapsible>
 
-                <Collapsible title="Time range / sorting" defaultOpen={false}>
-                  {netFollowsTimeline
-                    ? <div className="muted small">Time window follows the crisis timeline — press Play above to animate. Uncheck “Follow timeline” above the graph to set a network-only range here.</div>
-                    : <div className="muted small">Network-only time range. Independent of the heatmap and crisis timeline. Leave empty for the full range.</div>}
-                  <div className={`time-inputs ${netFollowsTimeline ? 'disabled' : ''}`}>
-                    <label>Start<input type="datetime-local" value={netStartTime} onChange={e => setNetStartTime(e.target.value)} /></label>
-                    <label>End<input type="datetime-local" value={netEndTime} onChange={e => setNetEndTime(e.target.value)} /></label>
-                  </div>
-                  <div className={`time-actions ${netFollowsTimeline ? 'disabled' : ''}`}>
-                    <button onClick={useFullNetTimeRange}>Use full range</button>
-                    <button onClick={clearNetTimeRange}>Clear</button>
-                  </div>
-                  {netMirrorsHeatmap
-                    ? <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}). Node numbers #1…#N follow the heatmap row order.</div>
-                    : netFollowsTimeline
-                      ? <div className="muted small">“Follow timeline” keeps your own network filters while the time window tracks the crisis timeline.</div>
-                      : <div className="muted small">Tip: use the mode selector above the graph to follow the timeline or mirror the heatmap.</div>}
-                </Collapsible>
+                {/* Network専用の手動 time range は廃止 — time window は常に crisis timeline に追従する。 */}
+                {netMirrorsHeatmap && (
+                  <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}). Node numbers #1…#N follow the heatmap row order.</div>
+                )}
 
                 <Collapsible title="Selected node" defaultOpen={true}>
                   {!selectedNetworkNode && <div className="muted small">Click a node to see its stats.</div>}
@@ -1224,18 +1192,13 @@ function App() {
                       <input type="checkbox" checked={netMirrorsHeatmap} onChange={e => setNetMirrorsHeatmap(e.target.checked)} />
                       Mirror heatmap filters
                     </label>
-                    <label className="check netmode-toggle" title="Time window follows the crisis timeline (press Play above to animate) instead of a manual network-only range.">
-                      <input type="checkbox" checked={netFollowsTimeline} onChange={e => setNetFollowsTimeline(e.target.checked)} />
-                      Follow timeline
-                    </label>
                   </div>
                 </div>
               </div>
-              {/* Follow timeline açıkken, network'ün üzerine mini playback HUD bindir:
-                  tam ekran network izlerken bile round / tarih / headline ve Play
-                  kontrolü görünür kalır (zaman akışı + graf gelişimi aynı anda). */}
+              {/* Network her zaman crisis timeline'a bağlı: mini playback HUD ile
+                  round / tarih / headline ve Play kontrolü network üzerinde görünür kalır. */}
               <div className="net-vis-stack">
-                {netFollowsTimeline && timeline.length > 0 && (
+                {timeline.length > 0 && (
                   <div className="net-time-hud">
                     <button className={`tl-play ${playing ? 'playing' : ''}`} onClick={togglePlay}
                       title={playing ? 'Pause' : 'Play the crisis timeline'}>
@@ -1260,7 +1223,7 @@ function App() {
                 data={displayNetwork}
                 layout={networkLayout}
                 sizeMetric={effectiveNetworkSize}
-                edgeMetric={netMirrorsHeatmap ? 'weight' : networkSort.edgeWeight}
+                edgeMetric="weight"
                 colorBySentiment={netMirrorsHeatmap ? heatmapSort.key === 'sentiment' : colorBySentiment}
                 selectedNode={selectedNetworkNode}
                 onSelectNode={handleSelectNode}
@@ -1276,12 +1239,7 @@ function App() {
                 <div className="muted small net-follow-note">
                   Mirroring heatmap: filters mirrored · node size = {effectiveNetworkSize} ·
                   {' '}numbered #1…#{heatmapOrder.length} by {{ agent_id: 'agent name', total: 'total messages', sentiment: 'mean sentiment' }[heatmapSort.key]} ({heatmapSort.dir})
-                  {netFollowsTimeline ? ' · time window follows the crisis timeline' : " · time window is network's own manual range"}
-                </div>
-              )}
-              {!netMirrorsHeatmap && netFollowsTimeline && (
-                <div className="muted small net-follow-note">
-                  Following timeline: your network filters apply · time window = current crisis-timeline round range · press Play above to animate.
+                  {' '}· time window follows the crisis timeline
                 </div>
               )}
 

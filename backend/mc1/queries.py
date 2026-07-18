@@ -205,6 +205,7 @@ def fetch_messages_for_edge(
     source_agent_id: str,
     target_agent_id: str,
     channel: str = "",
+    edge_message_type: str = "",
     via_channel: str = "",
     merger_only: bool = False,
     message_types: Optional[list[str]] = None,
@@ -231,6 +232,7 @@ def fetch_messages_for_edge(
         source_agent_id=source_agent_id,
         target_agent_id=target_agent_id,
         channel=channel or "",
+        edge_message_type=edge_message_type or "",
         via_channel=via_channel or "",
         merger_only=merger_only,
         message_types=selected_message_types,
@@ -287,6 +289,7 @@ def fetch_messages_for_edge(
         WHERE sender.agent_id = $source_agent_id
           AND targetAgent.agent_id = $target_agent_id
           AND ($channel = '' OR coalesce(m.channel, 'unknown') = $channel)
+          AND ($edge_message_type = '' OR coalesce(m.message_type, '') = $edge_message_type)
           {common_where_clause()}
         WITH m, r, {keyword_score_expression()} AS keyword_score
         RETURN m.message_id AS message_id,
