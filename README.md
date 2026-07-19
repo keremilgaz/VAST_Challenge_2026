@@ -86,3 +86,11 @@ pip install -r requirements.txt -r requirements-ml.txt
   `keyword_related` to 10 to keep the panel readable.
 - Dev-only Neo4j credentials are hard-coded in `docker-compose.yml`; change them
   before any non-local use.
+
+## Credits
+
+Agent identity icons use [Twemoji](https://github.com/jdecked/twemoji) graphics,
+Copyright Twitter, Inc and other contributors, licensed under
+[CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+The SVGs are inlined as data URIs in `frontend/src/agentIcons.jsx` (no runtime
+network fetch, no OS emoji-font dependency).

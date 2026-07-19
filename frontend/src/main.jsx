@@ -17,6 +17,8 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createRoot } from 'react-dom/client';
 import { RefreshCcw, Play, Pause } from 'lucide-react';
 import NetworkVisualization, { AGENTS, channelColor } from './network.jsx';
+// agent 識別アイコン（表示層のみ。agent_label 文字列には一切触れない）
+import { AgentIcon } from './agentIcons.jsx';
 import './style.css';
 
 import { API, TEXT_SOURCE_LABELS, visibilityGroupOf, CELL, LABEL_COL, EVENT_MARKERS } from './constants.js';
@@ -51,7 +53,10 @@ function App() {
   // ---- network固有 state ----
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages' });
-  const [colorBySentiment, setColorBySentiment] = useState(false); // node を sentiment 色で塗る（size とは独立）
+  // node を sentiment 色で塗る。手動トグルの UI は削除したので、通常は常に false。
+  // heatmap mirror モードのときだけ heatmapSort.key === 'sentiment' で有効化される
+  // （下の NetworkVisualization への受け渡しを参照）。reset 時に false へ戻す。
+  const [colorBySentiment, setColorBySentiment] = useState(false);
   // netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか。
   // Time window は常に crisis timeline に追従する（network専用の手動 time range は廃止 —
   // timeline bar が唯一の時間コントロール）。
@@ -669,7 +674,21 @@ function App() {
     ? ({ agent_id: 'messages', total: 'messages', sentiment: 'sentiment' }[heatmapSort.key] || 'messages')
     : networkSort.nodeSize;
 
-  // heatmap の並び順（sortedAgents の agent_id 列）を network に渡し、
+  // ? アイコン（.kw-help）で出す長文ヘルプ。merger keyword の ? と同じ仕組み
+// （title 属性 + aria-label）で、常設テキストを畳んで panel を軽くする。
+const HELP_SENTIMENT_SCALE = [
+  'Sentiment is scored per message with DistilBERT (distilbert-base-uncased-finetuned-sst-2-english),',
+  'a BERT-family classifier fine-tuned on SST-2.',
+  "Each cell shows the mean score of that agent's messages in that time bucket.",
+  '-1 = most negative, ~0 = neutral, +1 = most positive.',
+  'Empty cells mean the agent sent no messages.',
+].join(' ');
+
+const HELP_NETWORK_FILTER = "These filters apply to the network only - they don't change heatmap calculations.";
+
+const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never appear as edges - no edge color.';
+
+// heatmap の並び順（sortedAgents の agent_id 列）を network に渡し、
   // ノードに rank chip (#1, #2, …) を出して agent / total / sentiment いずれの
   // sort でも「heatmap の並び」が network に反映されるようにする。
   const heatmapOrder = useMemo(
@@ -788,7 +807,7 @@ function App() {
 
                 <Collapsible title="Heatmap mode" defaultOpen={true}>
                   <div className="seg seg-stack">
-                    {[['sentiment', 'Sentiment Heatmap'], ['count', 'Count Heatmap']].map(([v, l]) => (
+                    {[['count', 'Count Heatmap'], ['sentiment', 'Sentiment Heatmap']].map(([v, l]) => (
                       <button key={v} className={`seg-btn ${heatmapMode === v ? 'on' : ''}`} onClick={() => setHeatmapMode(v)}>{l}</button>
                     ))}
                   </div>
@@ -865,13 +884,13 @@ function App() {
                   </div>
                 </div>
 
-                <Collapsible title="Agents" defaultOpen={false}>
+                <Collapsible title="Agent type" defaultOpen={false}>
                   <label className="check select-all-row"><input type="checkbox" checked={agentFilter.length === 0} onChange={() => setAgentFilter([])} /> All</label>
                   <div className="type-grid">
                     {(options.agents || []).map(a => (
                       <label className="check" key={a.agent_id}>
                         <input type="checkbox" checked={isInSet(agentFilter, a.agent_id)} onChange={() => toggleAgent(a.agent_id)} />
-                        <span className="agent-dot" style={{ background: AGENTS[a.agent_id]?.color || '#888' }} /> {a.agent_label}
+                        <AgentIcon id={a.agent_id} size={15} /> {a.agent_label}
                       </label>
                     ))}
                   </div>
@@ -903,7 +922,7 @@ function App() {
             <div className="heatmap-card">
               <div className="heatmap-title">
                 <div>
-                  <h2>{granularity === 'daily' ? 'Daily' : 'Hourly'} · {heatmapMode === 'count' ? 'message volume' : 'BERT sentiment'}</h2>
+                  <h2>{granularity === 'daily' ? 'Daily' : 'Hourly'} · {heatmapMode === 'count' ? 'message volume' : 'Sentiment Heatmap'}</h2>
                   <p className="muted small">
                     {selectedCombos.length === 0 ? 'All channels' : selectedCombos.map(comboLabel).join(', ')}
                     {' / '}{selectedTextSources.length === 0 ? 'All text' : selectedTextSources.map(s => TEXT_SOURCE_LABELS[s] || s).join(', ')}
@@ -916,8 +935,9 @@ function App() {
               {/* legend */}
               <div className="legend">
                 {heatmapMode === 'count' && <span className="muted small">Fewer <span className="lg-swatch" style={{ background: '#e3eefb' }} /><span className="lg-swatch" style={{ background: '#93beec' }} /><span className="lg-swatch" style={{ background: '#558fd8' }} /><span className="lg-swatch" style={{ background: '#1a5cc0' }} /> more messages · log scale · <span className="lg-swatch" style={{ background: '#10202f' }} /> empty</span>}
-                {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> neutral <span className="lg-swatch" style={{ background: '#4ade80' }} /> positive · empty = no messages</span>}
+                {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> −1 negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> 0 neutral <span className="lg-swatch" style={{ background: '#4ade80' }} /> +1 positive<span className="kw-help" tabIndex={0} title={HELP_SENTIMENT_SCALE} aria-label={HELP_SENTIMENT_SCALE}>?</span></span>}
               </div>
+
 
               <div className="heatmap-scroll" ref={heatmapScrollRef} onScroll={handleHeatmapScroll}>
                 <div className="heatmap-grid" style={{ gridTemplateColumns: `${LABEL_COL}px repeat(${buckets.length || 1}, ${cell.w}px)`, gridAutoRows: `${cell.h}px` }}>
@@ -942,11 +962,11 @@ function App() {
                           de bu satır vurgulanır. Tekrar tıklama seçimi kaldırır. */}
                       <div
                         className={`agent-label ${selectedNetworkNode === agent.agent_id ? 'row-selected' : ''}`}
-                        style={{ borderLeft: `3px solid ${AGENTS[agent.agent_id]?.color || '#888'}` }}
                         onClick={() => handleSelectNode(agent.agent_id)}
                         title="Click to highlight this agent in the network (click again to deselect)"
                         role="button" tabIndex={0}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') handleSelectNode(agent.agent_id); }}>
+                        <AgentIcon id={agent.agent_id} size={15} />
                         {agent.agent_label}
                       </div>
                       {buckets.map(b => {
@@ -1044,7 +1064,7 @@ function App() {
           {effFiltersOpen && (
           <aside className="filter-panel">
             <div className="fp-title">
-              <span>Network controls</span>
+              <span>Network filter<span className="kw-help" tabIndex={0} title={HELP_NETWORK_FILTER} aria-label={HELP_NETWORK_FILTER}>?</span></span>
               <button type="button" className="fp-toggle" onClick={() => setFiltersOpen(false)}>
                 Hide
               </button>
@@ -1052,8 +1072,6 @@ function App() {
 
             {(
               <div className="fp-body">
-                <div className="muted small">These filters apply to the network only — they don't change heatmap calculations.</div>
-
                 {/* Heatmap filtre paneliyle aynı yapı: her filtre kendi Collapsible
                     başlığının altında, tıklayınca açılır (⑤). */}
                 <Collapsible title="Message channel" defaultOpen={false}>
@@ -1062,13 +1080,15 @@ function App() {
                   <label className="check select-all-row"><input type="checkbox" checked={netCombos.length === 0} onChange={() => setNetCombos([])} /> All</label>
                   {combosByGroup.external.length > 0 && (
                     <div className="type-group">
-                      <label className="check group-head">
-                        <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.external)} onChange={() => toggleNetGroup(combosByGroup.external)} />
-                        External <span className="muted small">(public-facing)</span>
-                      </label>
-                      {/* External post'lar recipients'sız public post — reply edge üretmezler,
-                          bu yüzden edge rengi yok (renkler edge üreten internal channel'lara ayrıldı). */}
-                      <div className="muted small indent">Public posts have no recipients, so they never appear as edges — no edge color.</div>
+                      {/* ? は label の外に出す。label の中に置くと、? をクリック/フォーカス
+                          しただけで group checkbox がトグルしてしまう。 */}
+                      <div className="merger-check-row">
+                        <label className="check group-head">
+                          <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.external)} onChange={() => toggleNetGroup(combosByGroup.external)} />
+                          External <span className="muted small">(public-facing)</span>
+                        </label>
+                        <span className="kw-help" tabIndex={0} title={HELP_EXTERNAL_CHANNEL} aria-label={HELP_EXTERNAL_CHANNEL}>?</span>
+                      </div>
                       <div className="type-grid indent">
                         {combosByGroup.external.map(c => (
                           <label className="check" key={`net-${c.key}`}>
@@ -1095,7 +1115,6 @@ function App() {
                       </div>
                     </div>
                   )}
-                  <div className="muted small" style={{ marginTop: 6 }}>Swatch = edge color of this channel in the graph.</div>
                   </div>
                 </Collapsible>
 
@@ -1107,7 +1126,7 @@ function App() {
                     {(options.agents || []).map(a => (
                       <label className="check" key={`net-a-${a.agent_id}`}>
                         <input type="checkbox" checked={isInSet(netAgentFilter, a.agent_id)} onChange={() => toggleNetAgent(a.agent_id)} />
-                        {a.agent_label}
+                        <AgentIcon id={a.agent_id} size={15} /> {a.agent_label}
                       </label>
                     ))}
                   </div>
@@ -1128,8 +1147,8 @@ function App() {
                   </div>
                 </div>
 
-                {/* networkLayout / networkSort / colorBySentiment の state は存在するのに
-                    以前のリファクタで操作 UI が消えていた。ここで復元する。 */}
+                {/* Layout / node size の操作 UI。
+                    colorBySentiment の手動トグルは削除済み（mirror モード専用になった）。 */}
                 <Collapsible title="Layout & metrics" defaultOpen={false}>
                   <div className="control-title">Layout</div>
                   <div className="seg">
@@ -1141,17 +1160,12 @@ function App() {
                   {netMirrorsHeatmap && <div className="muted small">Mirroring heatmap — node size / edge width / color follow the heatmap.</div>}
                   <div className="control-title">Node size</div>
                   <div className={`seg seg-stack ${netMirrorsHeatmap ? 'disabled' : ''}`}>
-                    {[['messages', 'Message count'], ['merger', 'Merger-related count'], ['sentiment', '|BERT sentiment|']].map(([v, l]) => (
+                    {[['messages', 'Message count'], ['merger', 'Merger-related count'], ['sentiment', 'Sentiment score']].map(([v, l]) => (
                       <button key={v} className={`seg-btn ${networkSort.nodeSize === v ? 'on' : ''}`} disabled={netMirrorsHeatmap}
                         onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
                     ))}
                   </div>
                   {/* Edge width は常に Reply count（選択肢は不要と判断し削除） */}
-                  <label className={`check ${netMirrorsHeatmap ? 'disabled' : ''}`} style={{ marginTop: 6 }}>
-                    <input type="checkbox" checked={colorBySentiment} disabled={netMirrorsHeatmap}
-                      onChange={e => setColorBySentiment(e.target.checked)} />
-                    Color nodes by BERT sentiment
-                  </label>
                 </Collapsible>
 
                 {/* Network専用の手動 time range は廃止 — time window は常に crisis timeline に追従する。 */}
@@ -1169,7 +1183,7 @@ function App() {
                         <div className="nd-name">{n.label}</div>
                         <div className="nd-row"><span>Messages</span><b>{n.message_count}</b></div>
                         <div className="nd-row"><span>Merger-related</span><b>{n.merger_related_count}</b></div>
-                        <div className="nd-row"><span>BERT sentiment</span><b>{n.bert_sentiment_score == null ? '—' : n.bert_sentiment_score.toFixed(2)}</b></div>
+                        <div className="nd-row"><span>Sentiment score</span><b>{n.bert_sentiment_score == null ? '—' : n.bert_sentiment_score.toFixed(2)}</b></div>
                       </div>
                     );
                   })()}

@@ -11,6 +11,9 @@
 
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+// agent ごとの識別アイコン（Twemoji SVG を data URI で埋め込み済み）。
+// node 中央の abbr を「置き換える」形で使う（追加すると node が過密になるため）。
+import { AGENT_ICONS } from './agentIcons.jsx';
 
 // Agent config. Node'lar tek renk (gri) çizilir — tutor önerisi: agent'lar
 // renkle değil, konum + kısaltma + etiketle ayırt edilsin, renk kanalı
@@ -339,7 +342,15 @@ export default function NetworkVisualization({
     nodeEnter.append('circle').attr('class', 'n-circle').attr('stroke-width', 2.5);
     nodeEnter.append('circle').attr('class', 'n-inner').attr('fill-opacity', 0.18);
     nodeEnter.append('text').attr('class', 'n-abbr').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-weight', 700).attr('pointer-events', 'none');
-    nodeEnter.append('text').attr('class', 'n-label').attr('text-anchor', 'middle').attr('font-family', 'sans-serif').attr('font-size', 11).attr('font-weight', 600).attr('fill', '#cfe0f2').attr('pointer-events', 'none').attr('opacity', 0);
+    // ── agent identity icon（abbr の代わりに node 中央へ）──
+    // n-icon-bg: アイコンの背後に敷く明色円。
+    //   sentiment 配色モード（node fill が青〜橙）や silent node（fill #161d2b の暗色）の
+    //   上では、アイコンの色が背景に溶けて読めなくなる。その2ケースでだけ敷く。
+    //   常時敷くと sentiment の色面積を無駄に削るので条件付きにしている。
+    nodeEnter.append('circle').attr('class', 'n-icon-bg').attr('fill', '#f2f5f9').attr('fill-opacity', 0.88).attr('pointer-events', 'none');
+    nodeEnter.append('image').attr('class', 'n-icon').attr('pointer-events', 'none')
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+    nodeEnter.append('text').attr('class', 'n-label').attr('text-anchor', 'middle').attr('font-family', 'sans-serif').attr('font-size', 11).attr('font-weight', 600).attr('fill', '#cfe0f2').attr('pointer-events', 'none').attr('opacity', 1);
     nodeEnter.append('rect').attr('class', 'n-badge-rect').attr('rx', 6.5).attr('height', 13).attr('pointer-events', 'none');
     nodeEnter.append('text').attr('class', 'n-badge-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9).attr('fill', '#fff').attr('font-weight', 700).attr('pointer-events', 'none');
     // "yanıt olmayan mesaj" chip'i (node'un sağ altı, kesikli çerçeve = edge'i olmayan mesajlar)
@@ -374,10 +385,23 @@ export default function NetworkVisualization({
     nodeSel.select('.n-circle').attr('stroke', nodeStroke)
       .transition().duration(DUR).attr('fill', nodeFill);
     nodeSel.select('.n-inner').attr('fill', nodeStroke).style('display', d => d.silent ? 'none' : null);
-    nodeSel.select('.n-abbr').attr('fill', abbrColor).text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2).toUpperCase());
+    // アイコンがある agent は abbr を出さない（併記すると node 中央が潰れる）。
+    // アイコン未定義の agent（データ側に新しい id が増えた場合など）は abbr にフォールバック。
+    const hasIcon = (d) => !!AGENT_ICONS[d.id];
+    nodeSel.select('.n-abbr').attr('fill', abbrColor)
+      .style('display', d => hasIcon(d) ? 'none' : null)
+      .text(d => AGENTS[d.id]?.abbr || d.id.slice(0, 2).toUpperCase());
+    nodeSel.select('.n-icon')
+      .style('display', d => hasIcon(d) ? null : 'none')
+      .attr('href', d => AGENT_ICONS[d.id]?.uri || null)
+      // silent node は「いるはずなのに声がない」状態。アイコンも少し沈ませる。
+      .attr('opacity', d => d.silent ? 0.55 : 1);
+    nodeSel.select('.n-icon-bg')
+      .style('display', d => (hasIcon(d) && (isSentiment || d.silent)) ? null : 'none');
     nodeSel.select('.n-label').text(d => d.silent ? `${d.label} (unresponsive)` : d.label);
-    // silent ラベルは常時表示
-    nodeSel.select('.n-label').filter(d => d.silent).attr('opacity', 1);
+    // abbr を廃したので、agent 名は hover 時だけでなく常時表示する。
+    // （アイコン単体では個体を同定できない ＝ 名前が唯一の同定手段になるため）
+    nodeSel.select('.n-label').attr('opacity', 1);
     nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
     nodeSel.select('.n-badge-txt').text(d => d.message_count);
     nodeSel.select('.n-bc-rect').attr('stroke', nodeStroke)
@@ -399,6 +423,15 @@ export default function NetworkVisualization({
     nodeSel.select('.n-circle').transition().duration(DUR).attr('r', d => d.r);
     nodeSel.select('.n-inner').transition().duration(DUR).attr('r', d => Math.max(2, d.r - 4));
     nodeSel.select('.n-abbr').transition().duration(DUR).attr('font-size', d => Math.max(9, Math.round(d.r * 0.56)));
+    // アイコンは node 半径に追随させる。下限 15px（これ以下はシルエットが潰れて判別できない）、
+    // 上限 30px（大きい node で円からはみ出さないよう抑える）。
+    // <image> は左上基準なので x/y に -size/2 を入れて中心に合わせる。
+    const iconSize = (d) => Math.min(30, Math.max(15, Math.round(d.r * 1.05)));
+    nodeSel.select('.n-icon').transition().duration(DUR)
+      .attr('width', iconSize).attr('height', iconSize)
+      .attr('x', d => -iconSize(d) / 2).attr('y', d => -iconSize(d) / 2);
+    nodeSel.select('.n-icon-bg').transition().duration(DUR)
+      .attr('r', d => iconSize(d) * 0.66);
     nodeSel
       .on('click', (ev, n) => { ev.stopPropagation(); onSelectNode && onSelectNode(n.id); })
       .on('mouseenter', function (ev, n) {
@@ -410,7 +443,7 @@ export default function NetworkVisualization({
           <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u21a9 replies, partner hidden</span><span class="tt-v">${n.hidden_replies ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u25cc non-reply (broadcast/root)</span><span class="tt-v">${n.broadcast_count ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${n.merger_related_count}</span></div>
-          <div class="tt-row"><span class="tt-k">BERT sentiment</span><span class="tt-v">${n.bert_sentiment_score == null ? '\u2014' : n.bert_sentiment_score.toFixed(2)}</span></div>`);
+          <div class="tt-row"><span class="tt-k">Sentiment score</span><span class="tt-v">${n.bert_sentiment_score == null ? '\u2014' : n.bert_sentiment_score.toFixed(2)}</span></div>`);
         highlightNode(n.id);
         d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 1);
       })
@@ -421,7 +454,9 @@ export default function NetworkVisualization({
         // 再実行されない）。ref から最新値を読む。
         const selNow = selectedNodeRef.current;
         if (!selNow) clearHighlight(); else highlightNode(selNow);
-        if (d.id !== selNow && !d.silent) d3.select(this).select('.n-label').transition().duration(120).attr('opacity', 0);
+        // agent 名は常時表示（abbr を廃したので、隠すと node が同定できなくなる）。
+        // 以前はここで opacity 0 に戻していた。
+        d3.select(this).select('.n-label').attr('opacity', 1);
       });
     // 新規 node だけ fade in
     nodeEnter.transition().duration(DUR).style('opacity', 1)
@@ -542,7 +577,8 @@ export default function NetworkVisualization({
     nodeSel
       .classed('selected', d => d.id === selectedNode)
       .each(function (d) {
-        d3.select(this).select('.n-label').attr('opacity', (d.silent || d.id === selectedNode) ? 1 : 0);
+        // ラベルは常時表示（abbr 廃止に伴う）。選択状態は色/リングで表現する。
+        d3.select(this).select('.n-label').attr('opacity', 1);
       });
     // 選択が変わったら dim/highlight も即時反映する。
     // （以前は次の data 再描画までノード選択のハイライトが更新されないバグがあった）

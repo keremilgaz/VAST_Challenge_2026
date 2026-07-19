@@ -598,3 +598,21 @@ summary { cursor: pointer; }
 /* clear-all-filters button */
 .gc-clear-filters { margin-left: 6px; color: #f0a890; border-color: rgba(216,90,48,0.5); background: rgba(216,90,48,0.10); }
 .gc-clear-filters:hover { border-color: #D85A30; background: rgba(216,90,48,0.18); }
+
+/* ---- agent identity icon (Twemoji SVG, data URI) ---- */
+/* heatmap の行ラベル / フィルタ行で agent 名の前に置く小アイコン。
+   flex: none = 親が flex のとき縮まないようにする（.agent-label は flex コンテナ）。
+   user-select: none = ラベルをコピーしたときにアイコンが混ざらないように。 */
+.agent-icon {
+  flex: none;
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 6px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* 暗い UI 上でアイコンが浮きすぎないよう、ごく僅かに彩度を落とす。
+   完全に無彩色にはしない（形だけでなく色も識別の手がかりになるため）。 */
+.agent-icon { filter: saturate(0.9); }
+/* row-selected のときはフルの彩度に戻して「選択中」を補強する */
+.agent-label.row-selected .agent-icon { filter: none; }
