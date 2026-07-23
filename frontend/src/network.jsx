@@ -1,18 +1,12 @@
 // ============================================================
 // NetworkVisualization — CrisisNet-style reply graph
 // ============================================================
-// CrisisNet.html の network 描画スタイルを React component として再現:
-//   - 明るいpastel塗りnode + 色付きリング + inner glow + badge
-//   - channel ごとに色分けされた曲線エッジ（同一ペアの複数channelは扇状に展開）
-//   - glow付きエッジ、dimmed/highlighted、tt-k/tt-v tooltip、channel legend
-// データは FastAPI /api/network から（edge は channel 分割で返る）。
-// props / API shape は従来互換（channel が無くても動く）。
+
 // ============================================================
 
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-// agent ごとの識別アイコン（Twemoji SVG を data URI で埋め込み済み）。
-// node 中央の abbr を「置き換える」形で使う（追加すると node が過密になるため）。
+
 import { AGENT_ICONS } from './agentIcons.jsx';
 
 // Agent config. Node'lar tek renk (gri) çizilir — tutor önerisi: agent'lar
@@ -41,23 +35,19 @@ const CHANNELS = {
   'comms_huddle|action':    { label: 'comms_huddle (action)',    color: '#BA7517' }, // turuncu
   one_on_one_chat:          { label: 'one_on_one',               color: '#E24B4A' }, // kırmızı (en belirgin)
   side_huddle:              { label: 'side_huddle',              color: '#1D9E75' }, // teal
-  // content 冒頭の名前呼びかけ（"Judge — ..." / "@pr-intern: ..."）による
-  // mention edge。reply ではないので破線で区別する。色はメッセージの
-  // channel（via_channel）に従う — legend 用の色はニュートラルなグレー。
+
   mention:                  { label: 'name mention',             color: '#8aa0bc' },
 };
-// comms_huddle は message_type (broadcast/action) ile renklenir; mention için
+
 // via_channel'ın message_type'ı yok → generic comms_huddle = broadcast mavisi.
 const colorKeyOf = (ch, mt) => (ch === 'comms_huddle' ? `comms_huddle|${mt || 'broadcast'}` : ch);
 export const channelColor = (ch, mt) => CHANNELS[colorKeyOf(ch, mt)]?.color || '#5A7A9A';
 const channelLabel = (ch, mt) => CHANNELS[colorKeyOf(ch, mt)]?.label || (ch || 'other');
-// edge の描画色: mention edge は「そのメッセージが流れた channel」の色
-// （via_channel、backend が返す）。それ以外は channel + message_type の色。
+
 const edgeColor = (e) => (e.channel === 'mention'
   ? channelColor(e.via_channel || 'unknown')
   : channelColor(e.channel, e.message_type));
 
-// CrisisNet と同じ初期座標
 const NP = {
   legal_agent:        { x: 220, y: 132 },
   quality_agent:      { x: 490, y: 110 },
@@ -82,8 +72,6 @@ function edgeWidth(w, maxW) {
   return Math.max(1.4, 1.4 + norm * 7);
 }
 
-// 発散配色: 負=赤 / 0=灰 / 正=青。赤緑は1型・2型色覚で混同されやすいため、
-// 緑ではなく青(#378ADD、comms_huddleチャンネル色と同じ既存の識別色)を正の極に使う。
 function sentimentColor(s) {
   if (s === null || s === undefined) return '#3a4a5e';
   if (s >= 0) {
@@ -112,13 +100,9 @@ export default function NetworkVisualization({
   const svgRef = useRef(null);
   const tooltipRef = useRef(null);
   const simRef = useRef(null);
-  // drag で動かしたnode位置を保持するref。effect本体のstateではないので、
-  // timeline scrub等でdataが変わってeffectが再実行されても中身は消えない
-  // （= 手動で組んだlayoutが time slider を動かすたびにリセットされるのを防ぐ）。
+
   const posRef = useRef({});
-  // selectedNode の最新値を保持する ref。メインの描画 effect は selectedNode を
-  // 依存に含めない（含めると選択のたびに全再描画され drag 位置が失われる）ため、
-  // mouseleave などのイベントハンドラは常にこの ref を読んで stale closure を避ける。
+
   const selectedNodeRef = useRef(selectedNode);
   selectedNodeRef.current = selectedNode;
   // İlk render'da tüm edge'ler "yeni" olduğundan pulse'ı ilk çizimde tetiklemeyiz.
@@ -128,11 +112,10 @@ export default function NetworkVisualization({
     const nodes = (data?.nodes || []).map(n => ({ ...n }));
     const rawEdges = data?.edges || [];
 
-    const DUR = 480; // enter/update/exit アニメ時間（play は 1s 間隔なので余裕を持って収まる）
+    const DUR = 480;
 
     const svg = d3.select(svgRef.current);
 
-    // ── scaffold は初回のみ構築し、以降は再利用（毎フレーム全消去せず差分だけアニメ）──
     let gMain = svg.select('g.net-main');
     if (gMain.empty()) {
       gMain = svg.append('g').attr('class', 'net-main');
@@ -162,7 +145,7 @@ export default function NetworkVisualization({
     const maxSize = d3.max(nodes, sizeValue) || 1;
     nodes.forEach(n => {
       n.r = nodeRadius(sizeValue(n), maxSize);
-      // drag済みの位置があればそれを優先し、無ければ既定配置を使う。
+
       const init = posRef.current[n.id] || NP[n.id] || { x: W / 2, y: H / 2 };
       n.x = init.x; n.y = init.y;
     });
@@ -208,23 +191,11 @@ export default function NetworkVisualization({
       n.broadcast_count = Math.max(0, (n.message_count || 0) - all);   // gerçek non-reply
     });
 
-    // ── "未返信 mention" 警告フラグの判定 ──
-    // このエージェントが現在のフィルター/時間範囲内で名前で明示的にメンションされ
-    // （破線 mention edge と同じ定義）、その mention 元メッセージに対して直接返信して
-    // いない場合に赤フラグを立てる（backend が unanswered_mention_count として集計）。
-    // 本人が無関係なメッセージを送っていても（message_count > 0）、メンションに返信して
-    // いなければ警告する。逆に、単に受信しただけ / 通常 reply を受けただけでは警告しない。
-    // 既存の赤リング・警告チップ・点滅アニメーション・CSS(.silent / .n-silent-*) を
-    // そのまま再利用するため、同じ値を silent フラグにも入れる。
     nodes.forEach(n => {
       n.has_unanswered_mentions = (n.unanswered_mention_count || 0) > 0;
       n.silent = n.has_unanswered_mentions;
     });
 
-    // ── 有向グラフ用の offset 計算 ──
-    // 同じ「向き」(source>target) の channel 別 edge は、その向きの基準オフセット周りに扇状展開する。
-    // 基準オフセットは a→b 進行方向に対する垂線（常に +）なので、A→B と B→A は
-    // 自動的に反対側へ弧を描き、矢印付きでも重ならず方向が読める。
     const dirTotal = {};
     links.forEach(e => {
       const k = `${e.source}>${e.target}`;
@@ -237,8 +208,8 @@ export default function NetworkVisualization({
       dirSeen[k] = i + 1;
       const n = dirTotal[k];
       const center = (n - 1) / 2;
-      const base = 24;           // 向きごとの基準ふくらみ（必ず片側）
-      e._off = base + (i - center) * 15;   // 同方向の複数 channel を扇状に
+      const base = 24;
+      e._off = base + (i - center) * 15;
     });
 
     // ── tooltip ──
@@ -264,9 +235,8 @@ export default function NetworkVisualization({
       edgeSel.classed('dimmed', false).classed('highlighted', false);
     }
 
-    // ── EDGES: keyed join（key = source>target>channel[>message_type][>via_channel]）──
     // comms_huddle broadcast/action ayrı edge'ler olduğundan message_type da key'e girer;
-    // mention edge channel別に bölündüğü için via_channel da key'e girer.
+
     const edgeKey = e => `${e.source}>${e.target}>${e.channel}${e.message_type ? '>' + e.message_type : ''}${e.via_channel ? '>' + e.via_channel : ''}`;
     const edgeData = gEdges.selectAll('g.net-edge').data(links, edgeKey);
     edgeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
@@ -283,8 +253,7 @@ export default function NetworkVisualization({
     edgeSel.classed('selected', e => selectedEdge === edgeKey(e));
     edgeSel.select('.edge-glow').style('stroke', e => edgeColor(e))
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW) + 6).style('stroke-opacity', 0.07);
-    // mention エッジは破線で「実データの reply ではない」と分かるようにする
-    // （色は via_channel = メッセージの channel の色）
+
     edgeSel.select('.edge-path').style('stroke', e => edgeColor(e))
       .style('stroke-dasharray', e => e.channel === 'mention' ? '6 4' : null)
       .transition().duration(DUR).style('stroke-width', e => edgeWidth(e.val, maxW)).style('stroke-opacity', 0.6);
@@ -312,7 +281,7 @@ export default function NetworkVisualization({
       })
       .on('mousemove', moveTT)
       .on('mouseleave', hideTT);
-    // 新規 edge だけ fade in → 終了後 inline opacity を外して dimmed/highlighted の CSS に委ねる
+
     edgeEnter.transition().duration(DUR).style('opacity', 1)
       .on('end', function () { d3.select(this).style('opacity', null); });
 
@@ -327,7 +296,7 @@ export default function NetworkVisualization({
     }
 
     // ── NODES ──
-    const isSentiment = colorBySentiment; // node 塗りを sentiment 色にするか（size とは独立）
+    const isSentiment = colorBySentiment;
     // silent node: içi boş (koyu) bırakılır — "burada olması gerekirdi ama ses yok" hissi
     // Tüm node'lar tek renk (gri): ring/badge = NODE_COLOR, dolgu = NODE_FILL.
     // abbr açık gri dolgu üzerinde okunaklı olsun diye koyu.
@@ -339,7 +308,6 @@ export default function NetworkVisualization({
     (heatmapOrder || []).forEach((id, i) => { rankById[id] = i + 1; });
     const showRank = followingHeatmapSort && (heatmapOrder || []).length > 0;
 
-    // ── NODES: keyed join（key = id。位置固定なので transform は移動しない）──
     const nodeData = gNodes.selectAll('g.net-node').data(nodes, d => d.id);
     nodeData.exit().interrupt().transition().duration(DUR).style('opacity', 0).remove();
     const nodeEnter = nodeData.enter().append('g').attr('class', 'net-node').style('cursor', 'pointer').style('opacity', 0);
@@ -348,11 +316,7 @@ export default function NetworkVisualization({
     nodeEnter.append('circle').attr('class', 'n-circle').attr('stroke-width', 2.5);
     nodeEnter.append('circle').attr('class', 'n-inner').attr('fill-opacity', 0.18);
     nodeEnter.append('text').attr('class', 'n-abbr').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-weight', 700).attr('pointer-events', 'none');
-    // ── agent identity icon（abbr の代わりに node 中央へ）──
-    // n-icon-bg: アイコンの背後に敷く明色円。
-    //   sentiment 配色モード（node fill が青〜橙）や silent node（fill #161d2b の暗色）の
-    //   上では、アイコンの色が背景に溶けて読めなくなる。その2ケースでだけ敷く。
-    //   常時敷くと sentiment の色面積を無駄に削るので条件付きにしている。
+
     nodeEnter.append('circle').attr('class', 'n-icon-bg').attr('fill', '#f2f5f9').attr('fill-opacity', 0.88).attr('pointer-events', 'none');
     nodeEnter.append('image').attr('class', 'n-icon').attr('pointer-events', 'none')
       .attr('preserveAspectRatio', 'xMidYMid meet');
@@ -369,9 +333,7 @@ export default function NetworkVisualization({
       .attr('fill', '#0b1626').attr('stroke-width', 1).attr('stroke-dasharray', '3 2').attr('pointer-events', 'none');
     nodeEnter.append('text').attr('class', 'n-hr-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace')
       .attr('font-size', 9).attr('font-weight', 700).attr('pointer-events', 'none');
-    // "未返信 mention" 警告: 赤い pulse 付き外周 ring + 下部中央 chip
-    // （名前で明示的にメンションされたが、その元メッセージに直接返信していない）
-    // 既存の CSS クラス名 (.n-silent-*) はスタイル崩れを避けるためそのまま再利用する。
+
     nodeEnter.append('circle').attr('class', 'n-silent-ring').attr('fill', 'none')
       .attr('stroke', '#e24b4a').attr('stroke-width', 2).attr('pointer-events', 'none');
     nodeEnter.append('rect').attr('class', 'n-silent-rect').attr('rx', 6.5).attr('height', 13)
@@ -382,7 +344,7 @@ export default function NetworkVisualization({
     nodeEnter.append('text').attr('class', 'n-rank-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 800).attr('fill', '#dbe7f5').attr('pointer-events', 'none');
 
     const nodeSel = nodeEnter.merge(nodeData);
-    // 既存 CSS クラス .silent / .n-silent-* をそのまま再利用（意味は「未返信 mention 有り」）。
+
     nodeSel.classed('silent', d => d.has_unanswered_mentions);
     nodeSel.select('.n-silent-ring').style('display', d => d.has_unanswered_mentions ? null : 'none');
     nodeSel.select('.n-silent-rect').style('display', d => d.has_unanswered_mentions ? null : 'none');
@@ -396,8 +358,7 @@ export default function NetworkVisualization({
     nodeSel.select('.n-circle').attr('stroke', nodeStroke)
       .transition().duration(DUR).attr('fill', nodeFill);
     nodeSel.select('.n-inner').attr('fill', nodeStroke).style('display', d => d.silent ? 'none' : null);
-    // アイコンがある agent は abbr を出さない（併記すると node 中央が潰れる）。
-    // アイコン未定義の agent（データ側に新しい id が増えた場合など）は abbr にフォールバック。
+
     const hasIcon = (d) => !!AGENT_ICONS[d.id];
     nodeSel.select('.n-abbr').attr('fill', abbrColor)
       .style('display', d => hasIcon(d) ? 'none' : null)
@@ -405,13 +366,12 @@ export default function NetworkVisualization({
     nodeSel.select('.n-icon')
       .style('display', d => hasIcon(d) ? null : 'none')
       .attr('href', d => AGENT_ICONS[d.id]?.uri || null)
-      // silent node は「いるはずなのに声がない」状態。アイコンも少し沈ませる。
+
       .attr('opacity', d => d.silent ? 0.55 : 1);
     nodeSel.select('.n-icon-bg')
       .style('display', d => (hasIcon(d) && (isSentiment || d.silent)) ? null : 'none');
     nodeSel.select('.n-label').text(d => d.label);
-    // abbr を廃したので、agent 名は hover 時だけでなく常時表示する。
-    // （アイコン単体では個体を同定できない ＝ 名前が唯一の同定手段になるため）
+
     nodeSel.select('.n-label').attr('opacity', 1);
     nodeSel.select('.n-badge-rect').attr('fill', nodeStroke);
     nodeSel.select('.n-badge-txt').text(d => d.message_count);
@@ -434,9 +394,7 @@ export default function NetworkVisualization({
     nodeSel.select('.n-circle').transition().duration(DUR).attr('r', d => d.r);
     nodeSel.select('.n-inner').transition().duration(DUR).attr('r', d => Math.max(2, d.r - 4));
     nodeSel.select('.n-abbr').transition().duration(DUR).attr('font-size', d => Math.max(9, Math.round(d.r * 0.56)));
-    // アイコンは node 半径に追随させる。下限 15px（これ以下はシルエットが潰れて判別できない）、
-    // 上限 30px（大きい node で円からはみ出さないよう抑える）。
-    // <image> は左上基準なので x/y に -size/2 を入れて中心に合わせる。
+
     const iconSize = (d) => Math.min(30, Math.max(15, Math.round(d.r * 1.05)));
     nodeSel.select('.n-icon').transition().duration(DUR)
       .attr('width', iconSize).attr('height', iconSize)
@@ -464,33 +422,30 @@ export default function NetworkVisualization({
       .on('mousemove', moveTT)
       .on('mouseleave', function (ev, d) {
         hideTT();
-        // selectedNode を閉包から読むと stale になる（この effect は selectedNode 変更で
-        // 再実行されない）。ref から最新値を読む。
+
         const selNow = selectedNodeRef.current;
         if (!selNow) clearHighlight(); else highlightNode(selNow);
-        // agent 名は常時表示（abbr を廃したので、隠すと node が同定できなくなる）。
-        // 以前はここで opacity 0 に戻していた。
+
         d3.select(this).select('.n-label').attr('opacity', 1);
       });
-    // 新規 node だけ fade in
+
     nodeEnter.transition().duration(DUR).style('opacity', 1)
       .on('end', function () { d3.select(this).style('opacity', null); });
 
-    // ── 曲線 path + 矢印（有向）。target node の手前で止め、矢印をその先に置く ──
     function edgeGeom(a, b, off) {
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const dx = b.x - a.x, dy = b.y - a.y;
       const l = Math.sqrt(dx * dx + dy * dy) || 1;
       const cx = mx + (-dy / l) * off, cy = my + (dx / l) * off;
-      // quadratic の b における接線方向 = (b - c)
+
       let tx = b.x - cx, ty = b.y - cy;
       const tl = Math.sqrt(tx * tx + ty * ty) || 1; tx /= tl; ty /= tl;
       const br = b.r || 13;
-      const ex = b.x - tx * (br + 9), ey = b.y - ty * (br + 9);   // 線の終点（node 手前）
-      const tipx = b.x - tx * (br + 2), tipy = b.y - ty * (br + 2); // 矢印の先端
+      const ex = b.x - tx * (br + 9), ey = b.y - ty * (br + 9);
+      const tipx = b.x - tx * (br + 2), tipy = b.y - ty * (br + 2);
       const aw = 4.5, alen = 8;
-      const bx = tipx - tx * alen, by = tipy - ty * alen;          // 矢印の根元中心
-      const px = -ty, py = tx;                                     // 垂線
+      const bx = tipx - tx * alen, by = tipy - ty * alen;
+      const px = -ty, py = tx;
       const arrow = `M${tipx},${tipy} L${bx + px * aw},${by + py * aw} L${bx - px * aw},${by - py * aw} Z`;
       const path = `M${a.x},${a.y} Q${cx},${cy} ${ex},${ey}`;
       const lx = 0.25 * a.x + 0.5 * cx + 0.25 * b.x, ly = 0.25 * a.y + 0.5 * cy + 0.25 * b.y;
@@ -548,7 +503,7 @@ export default function NetworkVisualization({
         const bw = t.length * 6.5 + 10;
         d3.select(this).attr('x', -(d.r - 2) - bw / 2).attr('y', d.r + 4.5);
       });
-      // "未返信 mention" 警告 chip'i: node'un alt-ortası (label ile çakışmayacak şekilde)
+
       nodeSel.select('.n-silent-rect').each(function (d) {
         if (!d.has_unanswered_mentions) return;
         const u = d.unanswered_mention_count || 0;
@@ -563,19 +518,18 @@ export default function NetworkVisualization({
         d3.select(this).attr('x', 0).attr('y', top + 10.5);
       });
       nodeSel.select('.n-abbr').attr('y', d => Math.max(9, Math.round(d.r * 0.56)) * 0.4);
-      // rank chip を node の左上に配置（message-count badge は右上）
+
       nodeSel.select('.n-rank-bg').attr('cx', d => -d.r + 1).attr('cy', d => -d.r + 1);
       nodeSel.select('.n-rank-txt').attr('x', d => -d.r + 1).attr('y', d => -d.r + 1 + 3.3);
     }
 
-    // ── レイアウト: 静的固定配置（force simulation なし）。位置は NP / circle で確定済み ──
     ticked();
 
     nodeSel.call(d3.drag()
       .on('start', function () { d3.select(this).raise(); })
       .on('drag', (ev, d) => {
         d.x = ev.x; d.y = ev.y;
-        posRef.current[d.id] = { x: ev.x, y: ev.y }; // 次回effect実行時もこの位置を使う
+        posRef.current[d.id] = { x: ev.x, y: ev.y };
         ticked();
       }));
 
@@ -592,11 +546,10 @@ export default function NetworkVisualization({
     nodeSel
       .classed('selected', d => d.id === selectedNode)
       .each(function (d) {
-        // ラベルは常時表示（abbr 廃止に伴う）。選択状態は色/リングで表現する。
+
         d3.select(this).select('.n-label').attr('opacity', 1);
       });
-    // 選択が変わったら dim/highlight も即時反映する。
-    // （以前は次の data 再描画までノード選択のハイライトが更新されないバグがあった）
+
     if (selectedNode) {
       const connected = new Set([selectedNode]);
       (data?.edges || []).forEach(e => {
@@ -612,14 +565,12 @@ export default function NetworkVisualization({
     }
   }, [selectedNode, data]);
 
-  // edge選択のハイライトだけを独立して更新（node effectと同じパターン）。
   useEffect(() => {
     const svg = d3.select(svgRef.current);
     svg.selectAll('g.net-edge')
       .classed('selected', d => `${d.source}>${d.target}>${d.channel}${d.message_type ? '>' + d.message_type : ''}${d.via_channel ? '>' + d.via_channel : ''}` === selectedEdge);
   }, [selectedEdge, data]);
 
-  // 現在の edges に存在する channel（+ comms_huddle は message_type 別）を legend 用に集計
   const channelTotals = {};
   (data?.edges || []).forEach(e => {
     const key = e.channel === 'mention' ? 'mention' : colorKeyOf(e.channel || 'unknown', e.message_type);

@@ -1,8 +1,7 @@
 // ============================================
-// Crisis timeline slider (CrisisNet風)
+
 // ============================================
-// 23 round の slider + Play/Pause。選択した round までを全ビューに累積反映する。
-// 下のミニ強度バーは round ごとの merger 関連メッセージ密度を示す（危機の高まりが一目でわかる）。
+
 import React, { useEffect } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { fmtRoundLabel } from '../utils.js';
@@ -43,7 +42,7 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
   const cur = timeline[idx] || {};
   const startCur = timeline[startIdx] || {};
   const maxTotal = Math.max(1, ...timeline.map(r => r.total_msgs || 0));
-  // round ごとの merger 比率の最大値。sequential（白→濃い赤）ramp を全幅で使うための正規化基準。
+
   const maxMergRatio = Math.max(0.0001, ...timeline.map(r => (r.total_msgs ? (r.merger_msgs || 0) / r.total_msgs : 0)));
   const n = timeline.length;
   const denom = Math.max(1, n - 1);
@@ -63,7 +62,6 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
     return { ...mk, idx: mIdx };
   });
 
-  // 選択範囲 [start, end] を 1 本のトラック上で塗る位置（%）
   const fillLeft = (startIdx / denom) * 100;
   const fillWidth = ((idx - startIdx) / denom) * 100;
 
@@ -87,7 +85,7 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
               const inRange = i >= startIdx && i <= idx;
               const h = 3 + 9 * Math.sqrt((r.total_msgs || 0) / maxTotal);
               const merg = (r.total_msgs ? (r.merger_msgs || 0) / r.total_msgs : 0);
-              // sequential 単色 ramp: 白 (#ffffff, merger 低) → 濃い赤 (#8b0000, merger 高)。
+
               const t = Math.pow(Math.min(1, merg / maxMergRatio), 0.7);
               const cr = Math.round(255 + (0x8b - 255) * t);
               const cg = Math.round(255 + (0x00 - 255) * t);
@@ -102,7 +100,6 @@ export function CrisisTimeline({ timeline, idx, setIdx, startIdx = 0, setStartId
               );
             })}
           </div>
-          {/* 1 本のトラックに 2 つの thumb（from / to）を重ねた range slider */}
           <div className="tl-range-multi">
             <div className="tl-track" />
             <div className="tl-track-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} />

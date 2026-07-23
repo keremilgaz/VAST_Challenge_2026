@@ -1,36 +1,16 @@
 // ============================================
 // Agent icons (Twemoji, inlined as data URIs)
 // ============================================
-// 【なぜフォント絵文字ではなく SVG を埋め込むのか】
-//   - OS 依存を消す: Apple / Google / Microsoft で絵柄が変わらない。
-//     Linux / Docker 環境で豆腐（□）にならない。
-//   - 書き出しに強い: SVG→PDF/PNG 変換で color emoji が落ちる事故を回避。
-//   - サイズを px で完全に制御できる（フォントのメトリクス依存がない）。
-// 【なぜ外部ファイル(public/)ではなくデータURIか】
-//   - Docker / Vite の base path 設定に依存しない。実行時のネットワーク取得ゼロ。
-//   - 全7個で ~8KB。バンドルへの影響は無視できる。
+
 //
 // Graphics: Twemoji (https://github.com/jdecked/twemoji)
 //   Copyright Twitter, Inc and other contributors. Graphics licensed under
 //   CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
-//   → README にも帰属表示を残すこと。
-//
-// 【割り当ての根拠】16px でシルエットが衝突しないことを優先している:
-//   Legal ⚖️ (左右対称T字) / Judge 🔔 (ドーム) / Platform-Trust 🛡️ (下向き三角)
-//   Social 📱 (縦長矩形) / PR 📣 (斜めコーン) / PR-Intern 📝 (紙＋斜め鉛筆)
-//   Intern 🎓 (平たい台形)
-//   ⚖️ を Legal、🔔 を Judge に振っている（両方を天秤系にすると判別不能になるため）。
-//   Judge が 🔔 なのは「鳴らすべき時に鳴らなかった鐘」という分析結果とも整合する。
-//
-// 注意: label / abbr は絶対にこのアイコンで置き換えないこと。
-//   agent_label は検索・ソート・backend との突合に使われる文字列。
-//   アイコンは「表示層だけ」の追加であり、データには一切触れない。
 
-// 注意: このプロジェクトには vite.config.js が無く、@vitejs/plugin-react も
-//   適用されていない。JSX は Vite 内蔵 esbuild の classic ランタイム
-//   （React.createElement）で変換されるため、JSX を含むファイルでは
-//   React の明示的な import が必須（省くとビルドは通るが実行時に
-//   "React is not defined" で画面が真っ白になる）。
+//
+
+//
+
 import React from 'react';
 
 export const AGENT_ICONS = {
@@ -50,9 +30,6 @@ export const AGENT_ICONS = {
   intern_agent: { alt: 'graduation cap', uri: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iIzMxMzczRCIgZD0iTTI0IDE0SDEycy01IDYtNSAxMCAxMSAxMSAxMSAxMSAxMS03IDExLTExLTUtMTAtNS0xMHoiLz48cGF0aCBmaWxsPSIjMjkyRjMzIiBkPSJNMTkuNjQgMS4yOGMtLjkwMS0uNzA0LTIuMzc3LS43MDQtMy4yNzggMEwxLjYzOSAxMi43NzZjLS45MDEuNzA0LS45MDEgMS44NTYgMCAyLjU2bDE0LjcyMiAxMS40OTVjLjkwMi43MDQgMi4zNzcuNzA0IDMuMjc4IDBsMTQuNzIyLTExLjQ5NWMuOTAyLS43MDQuOTAyLTEuODU2IDAtMi41NkwxOS42NCAxLjI4eiIvPjxwYXRoIGZpbGw9IiMzOTQxNDYiIGQ9Ik0xOS42NCAxLjI4Yy0uOTAxLS43MDQtMi4zNzctLjcwNC0zLjI3OCAwTDEuNjM5IDEyLjc3NmMtLjkwMS43MDQtLjkwMSAxLjg1NiAwIDIuNTZsMTQuNzIyIDExLjQ5NWMuOTAxLjcwNCAyLjM3Ny43MDQgMy4yNzggMGwxNC43MjMtMTEuNDk1Yy45MDEtLjcwNC45MDEtMS44NTYgMC0yLjU2TDE5LjY0IDEuMjh6Ii8+PHBhdGggZmlsbD0iI0ZDQUI0MCIgZD0iTTggMjVzLTIgMi0yIDN2NnMwIDIgMiAyIDItMiAyLTJ2LTZjMC0xLTItMy0yLTN6Ii8+PGNpcmNsZSBmaWxsPSIjRkREODg4IiBjeD0iOCIgY3k9IjI2IiByPSIzIi8+PHBhdGggZmlsbD0iI0ZDQUI0MCIgZD0iTTguMDAxIDI3Yy0uNTUyIDAtMS0uNDQ3LTEtMXYtMy45NThjLS4wNDItLjYzNC4xODctMi4wMzYgMS4zMTctMi44ODRsOS4wMjItNy45MWMuNDE2LS4zNjUgMS4wNDgtLjMyMyAxLjQxMS4wOTMuMzY0LjQxNS4zMjIgMS4wNDctLjA5MyAxLjQxMWwtOS4wOCA3Ljk1OEM4Ljk3NCAyMS4xNjYgOSAyMS45ODIgOSAyMS45OUw5LjAwMiAyNmMwIC41NTMtLjQ0OCAxLTEuMDAxIDF6Ii8+PGNpcmNsZSBmaWxsPSIjMzEzNzNEIiBjeD0iMTgiIGN5PSIxMyIgcj0iMyIvPjwvc3ZnPg==' },
 };
 
-// 表示用ヘルパ。React 側（heatmap の行ラベル / フィルタ）で使う。
-// aria-hidden にしているのは、隣に必ず agent 名テキストが並ぶため
-// （スクリーンリーダーが「balance scale」等を二重に読み上げるのを防ぐ）。
 export function AgentIcon({ id, size = 15, style }) {
   const ic = AGENT_ICONS[id];
   if (!ic) return null;

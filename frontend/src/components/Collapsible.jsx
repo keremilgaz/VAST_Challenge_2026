@@ -1,5 +1,5 @@
 // ============================================
-// 再利用可能な Collapsible（sort/filter topicの折りたたみ用）
+
 // ============================================
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';

@@ -1,44 +1,29 @@
 # ============================================================
-# 設定値・定数 (constants / configuration)
 # ============================================================
-# 旧 main.py の先頭〜各所に散らばっていた定数を1か所に集約したモジュール。
-# 値は一切変更していない。
 
 import os
 from pathlib import Path
 
-# Docker環境では環境変数からNeo4jの接続先を読む
-# 環境変数がなければローカル実行用のデフォルト値を使う
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password123")
 
-# 読み込む元データJSONの場所
 DATA_PATH = Path(os.getenv("DATA_PATH", "/app/data/MC1_final_00.json"))
 
 
-# merger-related 判定に使うキーワード一覧
-# message content や internal_state にこれらが含まれているかを確認する
-# これがひとつでも含まれていたら、merger関連ワードに判定
 MERGER_KEYWORDS = [
     "merger",
-    # "merge" は emergency などに誤ヒットするので外す
     "civicloom",
     "elenamarquez",  # CEO of CivicLoom
     "harborcrest",   # project name
     "embargo",
 ]
 
-# frontendのinner thought filterで使う選択肢
-# 空リストの場合は「すべてのtext source」を意味する
 TEXT_SOURCE_OPTIONS = ["content", "reacting", "rationalizing", "deliberating"]
 
 
 # ============================================================
-# 会話リンク解決で使う recipient role → agent_id マップ
 # ============================================================
-# `responding_to` の @role メンションや recipients の role token を
-# 実際の agent_id に変換するための対応表。
 RECIPIENT_ROLE_TO_AGENT = {
     "legal": "legal_agent",
     "pr": "pr_agent",
@@ -51,17 +36,9 @@ RECIPIENT_ROLE_TO_AGENT = {
 
 
 # ============================================================
-# 名前呼びかけ (vocative) mention 検出パターン
 # ============================================================
-# netvis はこれまで @role メンション（responding_to / recipients）しか認識して
-# いなかったが、message content の冒頭で名前だけで呼びかけるケースがある:
 #   "Judge — SaltWind published the merger. ..."   (#803, 6/5 17:01)
 #   "Legal, can you confirm ..."
-# これらも「その agent に宛てた message」として network に反映するための
-# 正規表現（Neo4j `=~` 用 = Java regex、文字列全体にマッチさせる）。
-# ルール: content 先頭（任意の空白後）に、@付き or 素の名前 → 区切り記号
-# （— – : , - --）→ 空白、と続くものだけを vocative とみなす。
-# 区切りの後に空白を要求することで "pr-intern" 冒頭の "pr" などへの誤マッチを防ぐ。
 def _vocative_pattern(*aliases: str) -> str:
     alt = "|".join(aliases)
     return rf"(?is)^\s*@?(?:{alt})\s*(?:—|–|::?|,|-{{1,2}})\s.*"
@@ -78,8 +55,6 @@ AGENT_VOCATIVE_PATTERNS = {
 }
 
 
-# market_snapshot.sentiment のラベルを可視化用の数値(-1〜1)に変換するマップ。
-# JSON内のmarket sentiment labelをそのまま使い、BERTでは再計算しない。
 SENTIMENT_LABEL_TO_VALUE = {
     "positive": 1.0,
     "recovering": 0.5,
@@ -93,18 +68,12 @@ SENTIMENT_LABEL_TO_VALUE = {
 
 
 # ============================================================
-# Message Context / Related Messages 用の定数
 # ============================================================
-# crisisに関係する重要語。selected message と関連messageで共有されていれば
-# keyword_related として扱う。word-boundaryで照合する（"GO" が "going" に
-# 誤マッチしないようにするため）。
 CRISIS_KEYWORDS = [
     "embargo", "CivicLoom", "HarborCrest", "SaltWind", "GO", "staged",
     "anonymous", "legal", "NHPI", "Retention Optimizer", "PR-Intern",
     "intern", "side_huddle", "official_post", "personal_post",
 ]
 
-# same channel context を集める時間窓（分）。
 CHANNEL_WINDOW_MINUTES = 120
-# same agent / temporal neighbors で前後に取る件数。
 NEIGHBOR_COUNT = 3

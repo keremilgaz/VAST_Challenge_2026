@@ -1,23 +1,16 @@
 // ============================================
-// React アプリのメインファイル (VAST Challenge Mini Challenge 1)
+
 // ============================================
-// 1画面で Heatmap / Message Detail / Stock・Sentiment Line Chart / Network を統合表示する。
+
 //
-// 旧 main.jsx は肥大化していたため、純粋関数・定数・各コンポーネントを別モジュールに分割した:
-//   constants.js                            … 共有定数 (API / CELL / ラベル等)
-//   utils.js                                … 時間表示 / cell色 / 数値フォーマット
-//   components/Collapsible.jsx              … 折りたたみ
-//   components/CrisisTimeline.jsx           … 危機タイムライン slider
-//   components/StockSentimentLineChart.jsx  … 株価/センチメント折れ線
-//   components/messagePanels.jsx            … メッセージ一覧/詳細/関連/会話フロー
-// このファイルには App（全体の状態管理とレイアウト）だけを残している。ロジックは不変。
+
 // ============================================
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RefreshCcw, Play, Pause } from 'lucide-react';
 import NetworkVisualization, { AGENTS, channelColor } from './network.jsx';
-// agent 識別アイコン（表示層のみ。agent_label 文字列には一切触れない）
+
 import { AgentIcon } from './agentIcons.jsx';
 import './style.css';
 
@@ -36,30 +29,23 @@ import {
   MessageDetailPanel, EdgeMessagesPanel, NodeMessagesPanel, ConversationFlowModal,
 } from './components/messagePanels.jsx';
 
-
 function App() {
-  // ---- 共通filter state (heatmap / network / line chart 共通) ----
+
   const [granularity, setGranularity] = useState('hourly');
   const [mergerOnly, setMergerOnly] = useState(false);
   const [selectedCombos, setSelectedCombos] = useState([]);
   const [selectedTextSources, setSelectedTextSources] = useState([]);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [agentFilter, setAgentFilter] = useState([]); // 空=All
+  const [agentFilter, setAgentFilter] = useState([]);
 
-  // ---- heatmap固有 state ----
   const [heatmapMode, setHeatmapMode] = useState('count'); // count | sentiment
   const [heatmapSort, setHeatmapSort] = useState({ key: 'agent_id', dir: 'asc' }); // key: agent_id|total|sentiment
 
-  // ---- network固有 state ----
   const [networkLayout, setNetworkLayout] = useState('force'); // force | circle
   const [networkSort, setNetworkSort] = useState({ nodeSize: 'messages' });
-  // node を sentiment 色で塗る。手動トグルの UI は削除したので、通常は常に false。
-  // heatmap mirror モードのときだけ heatmapSort.key === 'sentiment' で有効化される
-  // （下の NetworkVisualization への受け渡しを参照）。reset 時に false へ戻す。
+
   const [colorBySentiment, setColorBySentiment] = useState(false);
-  // netMirrorsHeatmap: filter / sort / node-size を heatmap から取るか、network自前かにするか。
-  // Time window は常に crisis timeline に追従する（network専用の手動 time range は廃止 —
-  // timeline bar が唯一の時間コントロール）。
+
   const [netMirrorsHeatmap, setNetMirrorsHeatmap] = useState(false);
   const [selectedNetworkNode, setSelectedNetworkNode] = useState(null);
   // ---- node click → Node Messages Panel (broadcast/root mesajlar dahil) ----
@@ -70,39 +56,31 @@ function App() {
   const [edgeMessages, setEdgeMessages] = useState([]);
   const [isEdgeDetailCollapsed, setIsEdgeDetailCollapsed] = useState(false);
 
-  // network専用 filter（heatmapの計算には一切影響させない。networkだけに適用する）
   const [netCombos, setNetCombos] = useState([]);
   const [netMergerOnly, setNetMergerOnly] = useState(false);
-  const [netAgentFilter, setNetAgentFilter] = useState([]); // 空=All（client側でnode絞り込み）
+  const [netAgentFilter, setNetAgentFilter] = useState([]);
 
-  // 左パネル全体の開閉
-  // 左サイドバー（heatmap filters + network controls）を一括で開閉する。
-  // 閉じると heatmap と network が全幅に広がる。
   const [filtersOpen, setFiltersOpen] = useState(true);
 
-  // ---- 表示/非表示 ----
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showLineChart, setShowLineChart] = useState(true);
   const [showNetwork, setShowNetwork] = useState(true);
-  const [showSeqFlow, setShowSeqFlow] = useState(true); // heatmap 上の sequential flow
-  // side-by-side（karşılaştırma）: heatmap と network を横並びにして同時に見る。
-  // この modda detaylı filtre panelleri ve line chart 非表示（üst sıra temiz karşılaştırma）。
+  const [showSeqFlow, setShowSeqFlow] = useState(true);
+
   const [sideBySide, setSideBySide] = useState(false);
   const [showStockPriceLine, setShowStockPriceLine] = useState(true);
-  // side-by-side modunda filtre panellerini ve line chart'ı gizle（layout için türetilmiş）。
+
   const effFiltersOpen = filtersOpen && !sideBySide;
   const effShowLineChart = showLineChart && !sideBySide;
-  // side-by-side のときは line chart 同様、sequential flow も隠す。
+
   const effShowSeqFlow = showSeqFlow && !sideBySide;
   const [showBertSentimentLine, setShowBertSentimentLine] = useState(true);
 
-  // ---- crisis timeline slider (CrisisNet風: round N まで累積表示) ----
   const [timeline, setTimeline] = useState([]);          // [{idx,hour,cutoff,event_headline,total_msgs,merger_msgs,...}]
-  const [timelineStartIdx, setTimelineStartIdx] = useState(0); // 窓の開始 round（前から絞る handle）
-  const [timelineIdx, setTimelineIdx] = useState(0);     // 窓の終了 round（先から絞る handle / play で進む）
+  const [timelineStartIdx, setTimelineStartIdx] = useState(0);
+  const [timelineIdx, setTimelineIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
 
-  // ---- データ ----
   const [options, setOptions] = useState({
     message_types: [], channels: [], channel_types: [], text_sources: ['content', 'reacting', 'rationalizing', 'deliberating'],
     agents: [], merger_count: 0, internal_merger_count: 0, combined_merger_count: 0,
@@ -125,7 +103,6 @@ function App() {
   const [contextStatus, setContextStatus] = useState(''); // '', 'loading', 'error'
   const [flowOpen, setFlowOpen] = useState(false); // Conversation Flow modal
 
-  // ---- sequential flow: 選択中 event と、その「event related messages」 ----
   const [seqEventId, setSeqEventId] = useState(null);
   const [seqEventMessages, setSeqEventMessages] = useState([]);
   const [seqMsgStatus, setSeqMsgStatus] = useState(''); // '', 'loading', 'error'
@@ -134,11 +111,9 @@ function App() {
   const [status, setStatus] = useState('');
 
   // ============================================
-  // 共通filterのquery string（heatmap mode以外の共通部分）
+
   // ============================================
-  // crisis timeline が active のとき、全ビュー共通の時間窓 [start, end]。
-  //  - end  = 終了 round の cutoff（その round までを含む）
-  //  - start = 開始 round の hour（前から絞る。startIdx==0 のときは空=最初から）
+
   // ============================================
   const timelineEnd = (timeline.length && timeline[timelineIdx])
     ? (timeline[timelineIdx].cutoff || timeline[timelineIdx].hour || '')
@@ -153,7 +128,7 @@ function App() {
     p.set('merger_only', mergerOnly ? 'true' : 'false');
     selectedCombos.forEach(t => p.append('message_types', t));
     selectedTextSources.forEach(s => p.append('text_sources', s));
-    // Heatmap の時間窓は crisis timeline が常に支配する（手動 time range は廃止）。
+
     if (timelineStart) p.set('start_time', timelineStart);
     if (timelineEnd) p.set('end_time', timelineEnd);
     if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
@@ -161,8 +136,7 @@ function App() {
   }, [granularity, mergerOnly, selectedCombos, selectedTextSources, searchKeyword, timelineStart, timelineEnd]);
 
   // ============================================
-  // network専用のquery string（heatmapとは独立。networkだけに効く）
-  // granularity は network graph 構造に影響しないが endpoint が要求するので共有する。
+
   // ============================================
   const networkQuery = useMemo(() => {
     const p = new URLSearchParams();
@@ -170,18 +144,17 @@ function App() {
 
     // --- filter context ---
     if (netMirrorsHeatmap) {
-      // 'heatmap': heatmap の filter context をそのまま採用する。
+
       p.set('merger_only', mergerOnly ? 'true' : 'false');
       selectedCombos.forEach(t => p.append('message_types', t));
       selectedTextSources.forEach(s => p.append('text_sources', s));
       if (searchKeyword.trim()) p.set('keyword', searchKeyword.trim());
     } else {
-      // 'independent': network 専用 filter を使う。
+
       p.set('merger_only', netMergerOnly ? 'true' : 'false');
       netCombos.forEach(t => p.append('message_types', t));
     }
 
-    // --- time window: 常に crisis timeline の窓に追従する（play で animate）---
     if (timelineStart) p.set('start_time', timelineStart);
     if (timelineEnd) p.set('end_time', timelineEnd);
     return p.toString();
@@ -191,7 +164,7 @@ function App() {
       timelineStart, timelineEnd]);
 
   // ============================================
-  // データ取得
+
   // ============================================
   async function loadOptions() {
     try {
@@ -210,7 +183,7 @@ function App() {
       const data = await res.json();
       const rounds = data.rounds || [];
       setTimeline(rounds);
-      // 既定では最後の round（= 全期間）を選択 → 今までと同じ「全部表示」状態
+
       if (rounds.length) setTimelineIdx(rounds.length - 1);
     } catch (e) {
       setTimeline([]);
@@ -224,7 +197,7 @@ function App() {
       if (!res.ok) throw new Error(`heatmap ${res.status}`);
       const data = await res.json();
       setHeatmap(data);
-      // filterが変わったら選択中cellと詳細はリセット
+
       setSelected(null);
       setMessages([]);
       setRounds([]);
@@ -261,7 +234,7 @@ function App() {
 
   useEffect(() => { loadOptions(); }, []);
   useEffect(() => { loadTimeline(); }, []);
-  // message_id → #番号 マップを起動時に1回ロード（responding_to の表示用）。
+
   useEffect(() => {
     fetch(`${API}/api/message-id-map`)
       .then(r => (r.ok ? r.json() : {}))
@@ -301,13 +274,13 @@ function App() {
   }, [playing, timeline.length]);
 
   useEffect(() => {
-    // 最後の round に達したら自動停止
+
     if (playing && timeline.length && timelineIdx >= timeline.length - 1) setPlaying(false);
   }, [timelineIdx, playing, timeline.length]);
 
   const togglePlay = () => {
     if (!timeline.length) return;
-    // 再生開始時、終了 handle が末尾なら開始 handle まで巻き戻して窓を成長させる
+
     if (!playing && timelineIdx >= timeline.length - 1) setTimelineIdx(timelineStartIdx);
     setPlaying(p => !p);
   };
@@ -322,18 +295,16 @@ function App() {
   }, [heatmap]);
 
   // ============================================
-  // agent行のsorting + agent filter
+
   // ============================================
-  // empty cellsは消さず、行(agent)の順番だけ並び替える。
+
   const sortedAgents = useMemo(() => {
     let agents = (heatmap.agents || []).slice();
 
-    // agent filter（空=All）
     if (agentFilter.length > 0) {
       agents = agents.filter(a => agentFilter.includes(a.agent_id));
     }
 
-    // 各agentの集計を計算
     const agg = {};
     for (const a of agents) {
       let total = 0, sentSum = 0, sentN = 0;
@@ -363,28 +334,20 @@ function App() {
   // ============================================
   // toggles
   // ============================================
-  // 「空配列 = All（全選択）」モデルの共通ヘルパ。
-  //   - ある項目が有効か: 空 = 全有効。
-  //   - 個別トグル: All 状態から1つ外すと「全項目選択 → その1つを除外」に展開。
-  //     全選択に戻ったら空配列に正規化して、All checkbox と見た目を一致させる。
+
   const isInSet = (selection, item) => selection.length === 0 || selection.includes(item);
   const toggleInSet = (setter, allItems, item) => setter(prev => {
     const base = prev.length === 0 ? allItems.slice() : prev.slice();
     let next = base.includes(item) ? base.filter(x => x !== item) : [...base, item];
-    if (allItems.length && allItems.every(x => next.includes(x))) next = []; // 全選択 → All
+    if (allItems.length && allItems.every(x => next.includes(x))) next = [];
     return next;
   });
   const agentIds = () => (options.agents || []).map(a => a.agent_id);
 
   // ============================================================
-  // Message channel × message_type の複合フィルタ選択肢を組み立てる
+
   // ============================================================
-  // options.channel_types = [{channel, message_type, count, key}]（backend meta 由来）。
-  // 1つの channel が複数 message_type を持つときだけラベルに (message_type) を付ける。
-  //   例: comms_huddle は broadcast/action に割れる → "comms_huddle (broadcast)" /
-  //       "comms_huddle (action)"。それ以外は channel 名のみ表示。
-  // これで comms_huddle の broadcast/action も、public_post の personal/official/anonymous も
-  // すべて個別に選べ、実在する7通りで全メッセージを漏れなく（網羅的に）カバーする。
+
   const comboOptions = useMemo(() => {
     const list = options.channel_types || [];
     const typesPerChannel = {};
@@ -408,8 +371,6 @@ function App() {
   const toggleCombo = (t) => toggleInSet(setSelectedCombos, allComboKeys, t);
   const toggleTextSource = (s) => toggleInSet(setSelectedTextSources, options.text_sources || Object.keys(TEXT_SOURCE_LABELS), s);
 
-  // inner thought の3ソースをまとめて on/off するためのヘルパ。
-  // 個別チェックボックスは従来どおり残しつつ、1つのチェックで3つ同時に切り替えられる。
   const INNER_THOUGHT_SOURCES = ['reacting', 'rationalizing', 'deliberating'];
   const isInnerAllActive = INNER_THOUGHT_SOURCES.every(s => isInSet(selectedTextSources, s));
   const toggleInnerThoughts = () => {
@@ -418,37 +379,31 @@ function App() {
       const base = prev.length === 0 ? allSources.slice() : prev.slice();
       const allOn = INNER_THOUGHT_SOURCES.every(s => base.includes(s));
       let next = allOn
-        ? base.filter(s => !INNER_THOUGHT_SOURCES.includes(s))           // 3つ全 off
-        : Array.from(new Set([...base, ...INNER_THOUGHT_SOURCES]));      // 3つ全 on
-      if (allSources.length && allSources.every(s => next.includes(s))) next = []; // 全選択 → All
+        ? base.filter(s => !INNER_THOUGHT_SOURCES.includes(s))
+        : Array.from(new Set([...base, ...INNER_THOUGHT_SOURCES]));
+      if (allSources.length && allSources.every(s => next.includes(s))) next = [];
       return next;
     });
   };
 
-  // message channel×type を visibility（internal / external）でグループ化する。
-  // 空配列 = 全選択（= All）なので、グループ補助 UI もそれを踏まえて表示する。
   const combosByGroup = useMemo(() => ({
     external: comboOptions.filter(c => c.group === 'external'),
     internal: comboOptions.filter(c => c.group === 'internal'),
   }), [comboOptions]);
 
-  // 「空配列 = All」を考慮して、ある combo が実際に有効か判定する。
   const isComboActive = (key) => selectedCombos.length === 0 || selectedCombos.includes(key);
 
-  // グループ内の combo が全部有効か（空配列=All も全有効として扱う）。
   const isGroupAllActive = (groupCombos) => groupCombos.length > 0 && groupCombos.every(c => isComboActive(c.key));
 
-  // グループ単位のトグル。空配列(All)状態から個別操作するときは、
-  // まず全 combo を明示選択した状態に展開してから差分を適用する。
   const toggleGroup = (groupCombos) => {
     const groupKeys = groupCombos.map(c => c.key);
     setSelectedCombos(prev => {
       const base = prev.length === 0 ? allComboKeys.slice() : prev.slice();
       const allOn = groupKeys.every(k => base.includes(k));
       let next = allOn
-        ? base.filter(k => !groupKeys.includes(k))       // グループ全 off
-        : Array.from(new Set([...base, ...groupKeys]));   // グループ全 on
-      // 結果が全 combo なら空配列(All)に正規化して見た目を揃える。
+        ? base.filter(k => !groupKeys.includes(k))
+        : Array.from(new Set([...base, ...groupKeys]));
+
       if (allComboKeys.length && allComboKeys.every(k => next.includes(k))) next = [];
       return next;
     });
@@ -456,11 +411,9 @@ function App() {
   const toggleAgent = (id) => toggleInSet(setAgentFilter, agentIds(), id);
 
   // ============================================
-  // Heatmap と Line Chart の横スクロール同期
+
   // ============================================
-  // heatmap / line chart / sequential flow は同じ inner width（LABEL_COL + buckets * cell.w）
-  // なので、あるペインの scrollLeft を他の全ペインにミラーすれば time 軸が常に一致する。
-  // guard で echo ループを防ぐ。（3ペインに拡張。sequential flow も heatmap と連動する。）
+
   const heatmapScrollRef = useRef(null);
   const lineScrollRef = useRef(null);
   const seqScrollRef = useRef(null);
@@ -478,9 +431,8 @@ function App() {
   const handleLineScroll = () => syncScroll(lineScrollRef.current);
   const handleSeqScroll = () => syncScroll(seqScrollRef.current);
 
-  // network専用 filter の toggle / helper（heatmapには影響しない）
   const toggleNetCombo = (t) => toggleInSet(setNetCombos, allComboKeys, t);
-  // network の channel も heatmap と同じ external / internal グループで扱う。
+
   const isNetComboActive = (key) => netCombos.length === 0 || netCombos.includes(key);
   const isNetGroupAllActive = (groupCombos) => groupCombos.length > 0 && groupCombos.every(c => isNetComboActive(c.key));
   const toggleNetGroup = (groupCombos) => {
@@ -497,8 +449,6 @@ function App() {
   };
   const toggleNetAgent = (id) => toggleInSet(setNetAgentFilter, agentIds(), id);
 
-  // すべての filter を既定値に戻す（view mode = granularity / heatmap mode / layout /
-  // node-edge metric は「絞り込み」ではないので保持する）。
   const clearAllFilters = () => {
     // heatmap filters
     setSearchKeyword('');
@@ -514,7 +464,7 @@ function App() {
     setNetMergerOnly(false);
     setNetCombos([]);
     setNetAgentFilter([]);
-    // crisis timeline → 全期間に戻す
+
     setPlaying(false);
     setTimelineStartIdx(0);
     if (timeline.length) setTimelineIdx(timeline.length - 1);
@@ -525,8 +475,8 @@ function App() {
   // ============================================
   async function selectCell(agent, bucket) {
     setSelected({ agent, bucket });
-    setIsMessageDetailCollapsed(false); // クリック時はパネルを開く
-    // 別cellを選んだら単一message選択はリセット
+    setIsMessageDetailCollapsed(false);
+
     setSelectedMessageId(null);
     setMessageContext(null);
     setContextStatus('');
@@ -556,16 +506,9 @@ function App() {
   }
 
   // ============================================
-  // network edge click → edge messages (同じ chat panel を再利用)
+
   // ============================================
-  // useCallback必須: これがNetworkVisualizationのpropとしてD3描画effectの
-  // dependency arrayに入っているため、毎render新しい関数参照になると
-  // effect全体が再実行され、drag等で動かしたnode位置がリセットされてしまう
-  // （layoutが"resetする"バグの原因だった）。networkQueryが変わらない限り
-  // 同じ関数参照を保つことでeffectの不要な再実行を防ぐ。
-  // node クリックで選択、同じ node を再クリックで選択解除。
-  // useCallback で参照を安定させ、NetworkVisualization の描画 effect が
-  // 毎 render 再実行されて drag 位置がリセットされるのを防ぐ（selectEdge と同じ理由）。
+
   const handleSelectNode = useCallback((id) => {
     setSelectedNetworkNode(prev => (prev === id ? null : id));
   }, []);
@@ -588,7 +531,7 @@ function App() {
       targetLabel,
     });
     setIsEdgeDetailCollapsed(false);
-    // 別edgeを選んだら単一message選択はリセット（heatmapのcell選択と同じ挙動）
+
     setSelectedMessageId(null);
     setMessageContext(null);
     setContextStatus('');
@@ -609,7 +552,6 @@ function App() {
     }
   }, [networkQuery]);
 
-  // 単一messageをクリック → 関連message(context)を取得
   async function selectMessage(messageId) {
     if (!messageId) return;
     setSelectedMessageId(messageId);
@@ -626,12 +568,10 @@ function App() {
     }
   }
 
-  // sequential flow: node クリックで event を選択（同じ node 再クリックで解除）。
   const handleSelectSeqEvent = useCallback((id) => {
     setSeqEventId(cur => (cur === id ? null : id));
   }, []);
 
-  // 選択中 event の「決定的に関連する message」を id 指定でまとめて取得（順序保持）。
   useEffect(() => {
     if (!seqEventId) { setSeqEventMessages([]); setSeqMsgStatus(''); return; }
     const ev = SEQ_EVENTS.find(e => e.id === seqEventId);
@@ -654,7 +594,6 @@ function App() {
     return () => { cancelled = true; };
   }, [seqEventId]);
 
-  // close / far keyword クリック → 既存keyword searchを再利用
   const onKeywordClick = (kw) => {
     setSearchKeyword(kw);
   };
@@ -666,16 +605,10 @@ function App() {
     setStatus('Reloaded. Extended schema (reply graph + stock price) was rebuilt.');
   }
 
-  // network に渡す実効 node-size metric。
-  // 'heatmap' mode のときは heatmap の sort key を node size にマップする。
-  //   sentiment -> |sentiment| サイズ、それ以外（agent_id / total）-> messages サイズ。
-  //   ※ agent_id は名前順なので「大きさ」を持たない。順序は heatmap rank chip で可視化する。
   const effectiveNetworkSize = netMirrorsHeatmap
     ? ({ agent_id: 'messages', total: 'messages', sentiment: 'sentiment' }[heatmapSort.key] || 'messages')
     : networkSort.nodeSize;
 
-  // ? アイコン（.kw-help）で出す長文ヘルプ。merger keyword の ? と同じ仕組み
-// （title 属性 + aria-label）で、常設テキストを畳んで panel を軽くする。
 const HELP_SENTIMENT_SCALE = [
   'Sentiment is scored per message with DistilBERT (distilbert-base-uncased-finetuned-sst-2-english),',
   'a BERT-family classifier fine-tuned on SST-2.',
@@ -688,16 +621,11 @@ const HELP_NETWORK_FILTER = "These filters apply to the network only - they don'
 
 const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never appear as edges - no edge color.';
 
-// heatmap の並び順（sortedAgents の agent_id 列）を network に渡し、
-  // ノードに rank chip (#1, #2, …) を出して agent / total / sentiment いずれの
-  // sort でも「heatmap の並び」が network に反映されるようにする。
   const heatmapOrder = useMemo(
     () => (sortedAgents || []).map(a => a.agent_id),
     [sortedAgents]
   );
 
-  // Agent type filter は network 側だけで client-side に適用する（heatmap非干渉）。
-  // node を絞ると、NetworkVisualization 側が dangling edge を自動的に落とす。
   const displayNetwork = useMemo(() => {
     if (netMirrorsHeatmap || !netAgentFilter.length) return network;
     const keep = new Set(netAgentFilter);
@@ -722,7 +650,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
     return map;
   }, [granularity]);
 
-  // 選択中cellのsummary値
   const selectedCellData = selected ? cellMap.get(`${selected.agent.agent_id}|${selected.bucket}`) : null;
 
   return (
@@ -732,9 +659,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
         <button className="reload" onClick={reloadDb}><RefreshCcw size={16} /> Reload DB</button>
       </header>
 
-      {/* ============================================
-          Global visibility controls (画面最上部)
-          ============================================ */}
       <section className="global-controls">
         <span className="gc-label">Show visualizations:</span>
         <label className="check"><input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} /> Heatmap</label>
@@ -776,16 +700,9 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
 
       {status && <div className="status">{status}</div>}
 
-      {/* ============================================
-          VISUALIZATION AREA（side-by-side のときは compare-row で横並び）
-          ============================================ */}
       <div className={sideBySide ? 'compare-row' : ''}>
-      {/* ============================================
-          HEATMAP SECTION : filter(左) | heatmap+detail+linechart(右)
-          ============================================ */}
       {(showHeatmap || effShowLineChart || effShowSeqFlow) && (
         <section className={`section heatmap-section ${effFiltersOpen ? '' : 'filters-hidden'}`}>
-          {/* ---- left: heatmap filter panel (collapsed 時は描画しない=全幅) ---- */}
           {effFiltersOpen && (
           <aside className="filter-panel">
             <div className="fp-title">
@@ -797,7 +714,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
 
             {(
               <div className="fp-body">
-                {/* basics (常時表示・コンパクト) */}
                 <div className="control-block">
                   <label>Search keyword
                     <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)}
@@ -855,7 +771,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
 
                 <Collapsible title="Text sources" defaultOpen={false}>
                   <label className="check select-all-row"><input type="checkbox" checked={selectedTextSources.length === 0} onChange={() => setSelectedTextSources([])} /> All</label>
-                  {/* content は単独。inner thought 3つは「Inner thought」グループでまとめて切替可能 */}
                   <div className="type-grid">
                     <label className="check"><input type="checkbox" checked={isInSet(selectedTextSources, 'content')} onChange={() => toggleTextSource('content')} /> {TEXT_SOURCE_LABELS['content']}</label>
                   </div>
@@ -916,7 +831,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
           </aside>
           )}
 
-          {/* ---- right: heatmap + detail + event flow + line chart（この順で縦積み） ---- */}
           <div className="viz-col">
             {showHeatmap && (
             <div className="heatmap-card">
@@ -937,7 +851,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
                 {heatmapMode === 'count' && <span className="muted small">Fewer <span className="lg-swatch" style={{ background: '#e3eefb' }} /><span className="lg-swatch" style={{ background: '#93beec' }} /><span className="lg-swatch" style={{ background: '#558fd8' }} /><span className="lg-swatch" style={{ background: '#1a5cc0' }} /> more messages · log scale · <span className="lg-swatch" style={{ background: '#10202f' }} /> empty</span>}
                 {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> −1 negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> 0 neutral <span className="lg-swatch" style={{ background: '#378ADD' }} /> +1 positive<span className="kw-help" tabIndex={0} title={HELP_SENTIMENT_SCALE} aria-label={HELP_SENTIMENT_SCALE}>?</span></span>}
               </div>
-
 
               <div className="heatmap-scroll" ref={heatmapScrollRef} onScroll={handleHeatmapScroll}>
                 <div className="heatmap-grid" style={{ gridTemplateColumns: `${LABEL_COL}px repeat(${buckets.length || 1}, ${cell.w}px)`, gridAutoRows: `${cell.h}px` }}>
@@ -1022,8 +935,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
             />
             )}
 
-            {/* ---- Sequential flow（event sequence flow + 選択ノードの関連メッセージ。
-                 heatmap の x 軸に合わせた横時系列。スクロール連動） ---- */}
             {effShowSeqFlow && (
               <SequentialFlow
                 granularity={granularity}
@@ -1056,9 +967,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
         </section>
       )}
 
-      {/* ============================================
-          NETWORK SECTION : filter(左) | network(右)
-          ============================================ */}
       {showNetwork && (
         <section className={`section network-section ${effFiltersOpen ? '' : 'filters-hidden'}`}>
           {effFiltersOpen && (
@@ -1080,8 +988,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
                   <label className="check select-all-row"><input type="checkbox" checked={netCombos.length === 0} onChange={() => setNetCombos([])} /> All</label>
                   {combosByGroup.external.length > 0 && (
                     <div className="type-group">
-                      {/* ? は label の外に出す。label の中に置くと、? をクリック/フォーカス
-                          しただけで group checkbox がトグルしてしまう。 */}
                       <div className="merger-check-row">
                         <label className="check group-head">
                           <input type="checkbox" checked={isNetGroupAllActive(combosByGroup.external)} onChange={() => toggleNetGroup(combosByGroup.external)} />
@@ -1147,8 +1053,6 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
                   </div>
                 </div>
 
-                {/* Layout / node size の操作 UI。
-                    colorBySentiment の手動トグルは削除済み（mirror モード専用になった）。 */}
                 <Collapsible title="Layout & metrics" defaultOpen={false}>
                   <div className="control-title">Layout</div>
                   <div className="seg">
@@ -1165,10 +1069,8 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
                         onClick={() => setNetworkSort(s => ({ ...s, nodeSize: v }))}>{l}</button>
                     ))}
                   </div>
-                  {/* Edge width は常に Reply count（選択肢は不要と判断し削除） */}
                 </Collapsible>
 
-                {/* Network専用の手動 time range は廃止 — time window は常に crisis timeline に追従する。 */}
                 {netMirrorsHeatmap && (
                   <div className="follow-note">Network mirrors the heatmap's filters and sort order ({heatmapSort.key}, {heatmapSort.dir}). Node numbers #1…#N follow the heatmap row order.</div>
                 )}

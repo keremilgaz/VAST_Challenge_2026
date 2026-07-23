@@ -1,8 +1,5 @@
 # ============================================================
-# Neo4j データインポート (JSON -> Neo4j)
 # ============================================================
-# 旧 main.py の reset_and_import をそのまま移動したモジュール。
-# JSONを読み込み、Agent / Message / Round ノードと REPLIES_TO / SENT / IN_ROUND を再構築する。
 
 import json
 from typing import Any, Dict, List
@@ -19,10 +16,6 @@ from .domain import (
 
 
 def reset_and_import() -> Dict[str, int]:
-    """
-    Neo4jの中身を一度全部消して、
-    JSONデータをNeo4jのNode / Relationshipとして入れ直す関数。
-    """
     wait_for_neo4j()
 
     data = load_json()
@@ -30,16 +23,13 @@ def reset_and_import() -> Dict[str, int]:
 
     message_count = 0
     agent_ids = set()
-    # resolved_parent_id を計算するために、全 message の宛先情報を集める
     collected_msgs: List[Dict[str, Any]] = []
 
     # === NEO4J GENERATION START ===
 
     with get_driver().session() as session:
-        # 既存データをすべて削除
         session.run("MATCH (n) DETACH DELETE n")
 
-        # 重複を防ぐための制約を作成
         session.run(
             "CREATE CONSTRAINT agent_id_unique IF NOT EXISTS "
             "FOR (a:Agent) REQUIRE a.agent_id IS UNIQUE"
@@ -68,11 +58,8 @@ def reset_and_import() -> Dict[str, int]:
                 ensure_ascii=False
             )
 
-            # JSON内のstock price文字列を数値に変換しておく（line chart用）
-            # 外部APIは使わず、JSON内のstock price dataだけを使う
             stock_price_value = parse_stock_price(market.get("stock_price"))
 
-            # Round nodeを作成または更新
             session.run(
                 """
                 MERGE (r:Round {hour: $hour})
@@ -216,9 +203,6 @@ def reset_and_import() -> Dict[str, int]:
                 )
 
         # === RESOLVE PARENT LINKS (responding_to + recipients) ===
-        # responding_to が @role メンションや空のケースを、recipients を併用して
-        # 実際の親 message_id に解決する。これを各 Message node に保存し、
-        # 以降の reply graph / network / 会話フローはこの resolved_parent_id を参照する。
         resolve_parent_links(collected_msgs)
         session.run(
             """
@@ -238,9 +222,6 @@ def reset_and_import() -> Dict[str, int]:
         )
 
         # === REPLY GRAPH GENERATION ===
-        # 解決済みの resolved_parent_id を使って Message -> Message の返信関係を作る。
-        # これで「@pr 宛て」などの役割宛てメッセージも正しい親に繋がり、
-        # reply graph / network から約30%の edge が欠落する問題が解消する。
         session.run(
             """
             MATCH (m:Message)
@@ -252,8 +233,6 @@ def reset_and_import() -> Dict[str, int]:
         )
 
         # === SEQUENTIAL COMMUNICATION ID ===
-        # 全messageをtimestamp昇順（同着はmessage_id）で並べ、1始まりの連番 comm_id を付与する。
-        # 元の message_id はそのまま保持する（comm_id は表示・会話フロー用の補助ID）。
         session.run(
             """
             MATCH (m:Message)

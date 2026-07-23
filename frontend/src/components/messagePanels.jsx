@@ -1,8 +1,7 @@
 // ============================================
-// メッセージ表示系コンポーネント群
+
 // ============================================
-// Heatmap / Network の両方で共有するメッセージパネル・関連メッセージ・会話フロー・
-// メッセージ関連パネルをまとめたモジュール。旧 main.jsx から移動。
+
 import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatRecipients } from '../utils.js';
@@ -11,7 +10,7 @@ import { messageNumber } from '../commIdMap.js';
 import { AGENTS } from '../network.jsx';
 
 // ============================================
-// Heatmap cell クリック → Message Detail Panel
+
 // ============================================
 export function MessageDetailPanel({ selected, selectedCellData, selectedSemantic, semanticComparisonMode, collapsed, setCollapsed, messages, rounds, selectedMessageId, messageContext, contextStatus, onSelectMessage, onOpenFlow }) {
   if (!selected) {
@@ -73,8 +72,7 @@ export function MessageDetailPanel({ selected, selectedCellData, selectedSemanti
 }
 
 // ============================================
-// Message article list — Heatmap の Message Detail Panel と Network の
-// Edge Messages Panel で共有する（同じ見た目・同じクリック挙動にするため）。
+
 // ============================================
 export function MessageList({ messages, selectedMessageId, onSelectMessage, renderExtra }) {
   if (!messages.length) {
@@ -130,7 +128,7 @@ export function MessageList({ messages, selectedMessageId, onSelectMessage, rend
 }
 
 // ============================================
-// Network edge click → Edge Messages Panel（Heatmapのchat panelと同じ見た目）
+
 // ============================================
 export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollapsed, selectedMessageId, messageContext, contextStatus, onSelectMessage, onOpenFlow }) {
   if (!selectedEdge) {
@@ -232,7 +230,7 @@ export function NodeMessagesPanel({ node, messages, collapsed, setCollapsed, sel
 }
 
 // ============================================
-// Related Messages / Context (新規)
+
 // ============================================
 export function RelatedMessages({ status, context, selectedMessageId, onSelectMessage, onOpenFlow }) {
   if (status === 'loading') {
@@ -321,13 +319,9 @@ const KIND_TAG = {
 export function ConversationFlowModal({ open, context, status, selectedMessageId, onClose, onSelectMessage }) {
   if (!open) return null;
 
-  // 別のmessageを読み込んでいる間、前のmessageのスレッドが表示されたままになる
-  // バグがあったので、loading/error 中は古い context を描画しない。
   const loading = status === 'loading';
   const errored = status === 'error';
 
-  // 解決済みスレッド全体（祖先 → 選択 message → 返信）を時系列で表示する。
-  // 親リンクは responding_to(message-id / @role) + recipients から解決済み。
   const thread = (context && context.thread) || [];
   const selIdx = thread.findIndex(t => t.is_focus);
   const before = selIdx >= 0 ? selIdx : 0;

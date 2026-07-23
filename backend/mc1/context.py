@@ -1,12 +1,7 @@
 # ============================================================
 # Message Context / Related Messages
 # ============================================================
-# 1つのmessageをクリックしたときに「なぜそのmessageが重要か」を理解できるよう、
-# 関連messageをまとめて返す。MLは一切不要（responding_to / channel / agent /
-# timestamp / round と crisis keyword だけで関連を判定する）。
 #
-# 旧 main.py の context 構築ロジック（_keywords_in / _project_related /
-# build_reply_thread / build_message_context 等）をそのまま移動したモジュール。
 
 import re
 from typing import Any, Dict, List, Optional
@@ -14,7 +9,6 @@ from typing import Any, Dict, List, Optional
 from .config import CRISIS_KEYWORDS, CHANNEL_WINDOW_MINUTES, NEIGHBOR_COUNT
 
 
-# crisis keyword を word-boundary で照合する（"GO" が "going" に誤マッチしないように）。
 _CRISIS_PATTERNS = [
     (kw, re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE))
     for kw in CRISIS_KEYWORDS
@@ -22,7 +16,6 @@ _CRISIS_PATTERNS = [
 
 
 def _keywords_in(text: str) -> List[str]:
-    """text に含まれる crisis keyword を返す（出現順・重複なし）。"""
     if not text:
         return []
     found = []
@@ -33,7 +26,6 @@ def _keywords_in(text: str) -> List[str]:
 
 
 def _project_related(m: Dict[str, Any], relation_type: str, relation_reason: str) -> Dict[str, Any]:
-    """関連messageを、frontendが期待する安定したshapeに整形する。"""
     return {
         "message_id": m.get("message_id"),
         "comm_id": m.get("comm_id"),
@@ -59,17 +51,6 @@ def build_reply_thread(
     all_msgs: List[Dict[str, Any]],
     message_id: str,
 ) -> List[Dict[str, Any]]:
-    """
-    `resolved_parent_id` に基づく「会話スレッド」を組み立てる。
-    （resolved_parent_id は responding_to の message-id / @role メンション / recipients を
-      統合して解決した親。resolve_parent_links() で各 message に付与済みであること。）
-
-    - 選択 message が返信してきた連鎖を root まで遡る（ancestors）
-    - 選択 message 自身
-    - 選択 message に（再帰的に）返信した全 message（descendants）
-    を 1 本の会話として timestamp 順に返す。
-    これが会話フロー popup の主役（「この message が他のどの message と繋がっているか」）。
-    """
     by_id = {m["message_id"]: m for m in all_msgs}
     sel = by_id.get(message_id)
     if sel is None:
@@ -79,7 +60,6 @@ def build_reply_thread(
         return m.get("resolved_parent_id") or ""
 
     def link_reason(m: Dict[str, Any]) -> str:
-        """この message が親にどう繋がっているかを人間可読の理由にする。"""
         pid = parent_of(m)
         if not pid:
             return "started the thread"
@@ -92,7 +72,6 @@ def build_reply_thread(
             return f"addressed {tlabel}" if tlabel else "addressed an earlier speaker"
         return f"replied to {tlabel}" if tlabel else "reply in thread"
 
-    # children index: resolved_parent_id -> [そのメッセージに返信した message...]
     children: Dict[str, List[Dict[str, Any]]] = {}
     for m in all_msgs:
         pid = parent_of(m)
@@ -101,7 +80,6 @@ def build_reply_thread(
 
     seen = {message_id}
 
-    # 1) ancestors: resolved_parent_id を root まで遡る
     chain: List[Dict[str, Any]] = []
     cur = sel
     while True:
@@ -112,9 +90,8 @@ def build_reply_thread(
         chain.append(parent)
         seen.add(pid)
         cur = parent
-    ancestors = list(reversed(chain))  # root が先頭
+    ancestors = list(reversed(chain))
 
-    # 2) descendants: 選択 message への返信を再帰的に（BFSで安定順）
     descendants: List[Dict[str, Any]] = []
     queue = list(children.get(message_id, []))
     while queue:
@@ -126,7 +103,6 @@ def build_reply_thread(
         descendants.append(node)
         queue.extend(children.get(nid, []))
 
-    # 3) まとめて 1 本の会話に（timestamp, comm_id でソート）
     thread_msgs = ancestors + [sel] + descendants
     thread_msgs.sort(key=lambda m: (m.get("timestamp") or "", m.get("comm_id") or 0))
 
@@ -147,7 +123,6 @@ def build_reply_thread(
 
 
 def _parse_ts(value: Optional[str]):
-    """timestamp_raw ('2046-05-17T09:00:00') を datetime に。失敗時 None。"""
     if not value:
         return None
     try:
@@ -158,7 +133,6 @@ def _parse_ts(value: Optional[str]):
 
 
 def _empty_context(message_id: str) -> Dict[str, Any]:
-    """messageが見つからない場合でもshapeを崩さない安全な空レスポンス。"""
     return {
         "found": False,
         "selected_message": None,
@@ -180,16 +154,11 @@ def build_message_context(
     window_minutes: int = CHANNEL_WINDOW_MINUTES,
     neighbor_count: int = NEIGHBOR_COUNT,
 ) -> Dict[str, Any]:
-    """
-    全messageのlist（timestamp昇順）と対象message_idから関連messageを構築する。
-    Neo4jから切り離した純粋関数なのでテストしやすい。
-    """
     by_id = {m["message_id"]: m for m in all_msgs}
     sel = by_id.get(message_id)
     if sel is None:
         return _empty_context(message_id)
 
-    # timestamp + message_id で安定ソート
     ordered = sorted(all_msgs, key=lambda m: (m.get("timestamp") or "", m.get("message_id") or ""))
 
     round_hour = sel.get("round_hour")
@@ -198,7 +167,6 @@ def build_message_context(
     sel_dt = _parse_ts(sel.get("timestamp"))
     sel_keywords = _keywords_in(sel.get("content") or "")
 
-    # 1. parent: resolved_parent_id が指すmessage（responding_to の @role / recipients も解決済み）
     parent = None
     pid = sel.get("resolved_parent_id") or ""
     if pid and pid in by_id and pid != message_id:
@@ -207,14 +175,12 @@ def build_message_context(
             "addressed earlier speaker" if kind == "addressed" else "parent message")
         parent = _project_related(by_id[pid], "parent", reason)
 
-    # 2. replies: resolved_parent_id == 選択message（この message に返信した全 message）
     replies = [
         _project_related(m, "reply", "direct reply" if (m.get("reply_kind") == "direct") else "addressed reply")
         for m in ordered
         if (m.get("resolved_parent_id") or "") == message_id
     ]
 
-    # 3. temporal neighbors: 同じround内で timestamp 順に前後 neighbor_count 件
     round_msgs = [m for m in ordered if m.get("round_hour") == round_hour]
     temporal_neighbors = []
     sel_idx = next((i for i, m in enumerate(round_msgs) if m["message_id"] == message_id), None)
@@ -223,7 +189,6 @@ def build_message_context(
              round_msgs[sel_idx + 1:sel_idx + 1 + neighbor_count]
         temporal_neighbors = [_project_related(m, "temporal", "same round context") for m in nb]
 
-    # 4. same channel context: 同じchannel かつ 時間窓内（時間が近い順に最大8件）
     same_channel_context = []
     if sel_dt is not None and channel:
         candidates = []
@@ -236,7 +201,6 @@ def build_message_context(
             delta = abs((mdt - sel_dt).total_seconds())
             if delta <= window_minutes * 60:
                 candidates.append((delta, m))
-        # 時間が近い順に絞り、表示用に再度timestamp順へ
         candidates.sort(key=lambda x: x[0])
         nearest = [m for _, m in candidates[:8]]
         nearest.sort(key=lambda m: (m.get("timestamp") or "", m.get("message_id") or ""))
@@ -245,7 +209,6 @@ def build_message_context(
             for m in nearest
         ]
 
-    # 5. same agent context: 同じagentの timestamp 順 前後 neighbor_count 件
     agent_msgs = [m for m in ordered if m.get("agent_id") == agent_id]
     same_agent_context = []
     aidx = next((i for i, m in enumerate(agent_msgs) if m["message_id"] == message_id), None)
@@ -254,7 +217,6 @@ def build_message_context(
              agent_msgs[aidx + 1:aidx + 1 + neighbor_count]
         same_agent_context = [_project_related(m, "same_agent", "same agent nearby") for m in an]
 
-    # 6. keyword related: 同じround内で、選択messageと共有するcrisis keywordを含むmessage
     keyword_related = []
     if sel_keywords:
         for m in round_msgs:
@@ -267,7 +229,6 @@ def build_message_context(
                 )
         keyword_related = keyword_related[:10]
 
-    # all_related: 優先順位順に flatten して message_id で dedupe（選択message自身は除外）
     all_related = []
     seen = {message_id}
     for group in ([parent] if parent else [], replies, temporal_neighbors,
@@ -280,7 +241,6 @@ def build_message_context(
             all_related.append(item)
     all_related.sort(key=lambda x: (x.get("timestamp") or "", x.get("message_id") or ""))
 
-    # selected message に "why this matters" を付与（channel / keyword / thread から生成）
     reasons = []
     if channel in ("side_huddle", "anonymous_post"):
         reasons.append(f"it occurs in {channel}")
@@ -297,7 +257,6 @@ def build_message_context(
 
     selected_message = _project_related(sel, "selected", "selected message")
     selected_message["why_matters"] = why
-    # 選択message本体は internal state も見られると便利なので付ける（任意フィールド）
     selected_message["internal_reacting"] = sel.get("internal_reacting")
     selected_message["internal_rationalizing"] = sel.get("internal_rationalizing")
     selected_message["internal_deliberating"] = sel.get("internal_deliberating")

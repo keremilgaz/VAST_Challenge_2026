@@ -1,8 +1,5 @@
 # ============================================================
-# Neo4j 読み取りクエリ (read helpers)
 # ============================================================
-# 旧 main.py の cell/semantic/all-rows/edge/context 用の Neo4j 読み取り関数を
-# そのまま移動したモジュール。Cypher は一切変更していない。
 
 from typing import Any, Dict, List, Optional
 
@@ -31,7 +28,6 @@ def fetch_messages_for_cell(
     end_time: str = "",
     keyword: str = "",
 ):
-    # keywordと、messagesで同じソートlogicを使うために共通の関数を使う。
     selected_message_types = normalize_message_types(message_types, message_type)
     selected_text_sources = normalize_text_sources(text_sources)
     normalized_keyword = keyword.lower().strip()
@@ -93,17 +89,6 @@ def fetch_rows_for_semantic(
     start_time: str,
     end_time: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Semantic change (cosine similarity) 専用の row 取得。
-
-    重要 (analysis correctness):
-    - semantic change は「full message text」から計算する必要があるため、
-      keyword / message_type / text_source / merger_only / visibility といった
-      filter は一切適用しない。time range だけは反映する。
-    - これにより keyword sort / message type sort / agent sort / row order は
-      semantic change の値に影響しなくなる（time range のみ計算に影響する）。
-    - 並びは timestamp, message_id で固定し、join順による埋め込みのブレも防ぐ。
-    """
     bucket_expr = bucket_expression(granularity)
     query = f"""
     MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
@@ -134,11 +119,6 @@ def build_time_axis(
     start_time: str,
     end_time: str,
 ) -> List[str]:
-    """
-    HeatmapとLine Chartで共通して使う「固定time axis」を作る。
-    Round.hour から全time bucketを作るので、messageが無い時間帯のbucketも残る。
-    これにより、filterやkeyword searchをかけてもtime axis自体は維持される。
-    """
     expr = round_bucket_expression(granularity)
     query = f"""
     MATCH (r:Round)
@@ -165,10 +145,6 @@ def fetch_all_rows(
     end_time: str,
     normalized_keyword: str,
 ) -> List[Dict[str, Any]]:
-    """
-    現在のfilter条件に一致する全messageを、bucket付きで一括取得する。
-    sentiment / semantic change を計算するために、cell単位でグルーピングして使う。
-    """
     bucket_expr = bucket_expression(granularity)
     query = f"""
     MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
@@ -216,14 +192,6 @@ def fetch_messages_for_edge(
     end_time: str = "",
     keyword: str = "",
 ):
-    """
-    Network の1本のedge（source agent -> target agent、channel別）の裏にある
-    実際のmessageを返す。/api/network の edge_query / mention_query と同じ
-    マッチ条件を使い、集計せずmessageそのものを返す点だけが違う。
-
-    channel == 'mention' の場合は reply graph ではなく、content 冒頭の
-    名前呼びかけ（"Judge — ..." など）による mention edge として扱う。
-    """
     selected_message_types = normalize_message_types(message_types, message_type)
     selected_text_sources = normalize_text_sources(text_sources)
     normalized_keyword = keyword.lower().strip()
@@ -244,9 +212,6 @@ def fetch_messages_for_edge(
     )
 
     if channel == "mention":
-        # 名前呼びかけ (vocative) mention edge: source agent の message のうち、
-        # content 冒頭で target agent に名前で呼びかけているもの
-        # （/api/network の mention_query と同じ条件）。
         params["vocative_pattern"] = AGENT_VOCATIVE_PATTERNS.get(target_agent_id, "a^")
         query = f"""
         MATCH (a:Agent)-[:SENT]->(m:Message)-[:IN_ROUND]->(r:Round)
@@ -282,7 +247,6 @@ def fetch_messages_for_edge(
         ORDER BY timestamp
         """
     else:
-        # 通常のreply edge: sender(source) が target agent の message に返信したもの。
         query = f"""
         MATCH (sender:Agent)-[:SENT]->(m:Message)-[:REPLIES_TO]->(target:Message)<-[:SENT]-(targetAgent:Agent)
         MATCH (m)-[:IN_ROUND]->(r:Round)
@@ -323,7 +287,6 @@ def fetch_messages_for_edge(
 
 
 def fetch_all_messages_for_context() -> List[Dict[str, Any]]:
-    """context構築に必要な全messageを Neo4j から取得（912件程度なので全件でOK）。"""
     query = """
     MATCH (m:Message)-[:IN_ROUND]->(r:Round)
     RETURN m.message_id AS message_id,

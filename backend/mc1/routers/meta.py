@@ -1,5 +1,4 @@
 # ============================================================
-# メタ系エンドポイント: health / admin reload / options / timeline / rounds
 # ============================================================
 
 from fastapi import APIRouter, Query
@@ -18,18 +17,11 @@ def health():
 
 @router.post("/admin/reload")
 def admin_reload():
-    """
-    手動でNeo4jのデータを入れ直すためのAPI。
-    """
     return reset_and_import()
 
 
 @router.get("/api/options")
 def options():
-    """
-    frontendのfilterで使う選択肢を返すAPI。
-    既存の情報（merger count, total count, min/max time, merger keywords など）は維持する。
-    """
     with get_driver().session() as session:
         message_types = [
             r["message_type"]
@@ -53,10 +45,6 @@ def options():
             )
         ]
 
-        # message_channel フィルタ用の (channel, message_type) の実在組み合わせ。
-        # 1つの channel が複数 message_type に割れる（comms_huddle→broadcast/action）ケースと、
-        # 1つの message_type が複数 channel に割れる（public_post→personal/official/anonymous）
-        # ケースの両方を、この複合キーで漏れなく表現する。key = channel + '|' + message_type。
         channel_types = [
             {
                 "channel": r["channel"],
@@ -139,12 +127,6 @@ def options():
 
 @router.get("/api/timeline")
 def timeline():
-    """
-    クライアントの時間スライダー用に、全 round (23) を時系列で返す。
-    各 round に cutoff（= その round までに含めるべき最大 timestamp_raw）を付ける。
-    cutoff を heatmap/network/line-chart の end_time として使うと、
-    "round N まで" を正確に（次の round を含めず）累積表示できる。
-    """
     query = """
     MATCH (r:Round)
     OPTIONAL MATCH (m:Message)-[:IN_ROUND]->(r)
@@ -186,10 +168,6 @@ def rounds_for_bucket(
     bucket: str,
     granularity: str = Query("daily", pattern="^(daily|hourly)$")
 ):
-    """
-    時間ヘッダーをクリックしたときに、
-    その日またはその時間に対応するround情報を返すAPI。
-    """
     if granularity == "daily":
         where = "substring(r.hour, 0, 10) = $bucket"
     else:
