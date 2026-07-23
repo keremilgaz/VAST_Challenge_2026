@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 import os
 from pathlib import Path
@@ -9,7 +7,6 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password123")
 
 DATA_PATH = Path(os.getenv("DATA_PATH", "/app/data/MC1_final_00.json"))
-
 
 MERGER_KEYWORDS = [
     "merger",
@@ -21,9 +18,6 @@ MERGER_KEYWORDS = [
 
 TEXT_SOURCE_OPTIONS = ["content", "reacting", "rationalizing", "deliberating"]
 
-
-# ============================================================
-# ============================================================
 RECIPIENT_ROLE_TO_AGENT = {
     "legal": "legal_agent",
     "pr": "pr_agent",
@@ -34,15 +28,11 @@ RECIPIENT_ROLE_TO_AGENT = {
     "judge": "judge_agent",
 }
 
-
-# ============================================================
-# ============================================================
 #   "Judge — SaltWind published the merger. ..."   (#803, 6/5 17:01)
 #   "Legal, can you confirm ..."
 def _vocative_pattern(*aliases: str) -> str:
     alt = "|".join(aliases)
     return rf"(?is)^\s*@?(?:{alt})\s*(?:—|–|::?|,|-{{1,2}})\s.*"
-
 
 AGENT_VOCATIVE_PATTERNS = {
     "legal_agent": _vocative_pattern("legal"),
@@ -53,7 +43,6 @@ AGENT_VOCATIVE_PATTERNS = {
     "intern_agent": _vocative_pattern("intern"),
     "judge_agent": _vocative_pattern("judge"),
 }
-
 
 SENTIMENT_LABEL_TO_VALUE = {
     "positive": 1.0,
@@ -66,9 +55,6 @@ SENTIMENT_LABEL_TO_VALUE = {
     "critical": -1.0,
 }
 
-
-# ============================================================
-# ============================================================
 CRISIS_KEYWORDS = [
     "embargo", "CivicLoom", "HarborCrest", "SaltWind", "GO", "staged",
     "anonymous", "legal", "NHPI", "Retention Optimizer", "PR-Intern",

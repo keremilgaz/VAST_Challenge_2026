@@ -1,6 +1,3 @@
-// ============================================
-
-// ============================================
 
 import React, { useMemo, useState } from 'react';
 import { CELL, LABEL_COL, SEQ_EVENTS, SEQ_EDGES, SEQ_KINDS } from '../constants.js';

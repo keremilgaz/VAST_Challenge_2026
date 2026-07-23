@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +17,6 @@ from ..queries import fetch_all_rows, fetch_messages_for_edge
 from ..nlp import sentiment_score
 
 router = APIRouter()
-
 
 @router.get("/api/network")
 def network(
@@ -119,8 +116,6 @@ def network(
     """
 
     #   `NOT (m)-[:REPLIES_TO]->(:Message {agent_id: t.agent_id})`
-    #
-    #
     #   unanswered_mention_count = mention_count - answered_mention_count
     mention_status_query = f"""
     MATCH (sender:Agent)-[:SENT]->(m:Message)
@@ -252,7 +247,6 @@ def network(
         },
     }
 
-
 @router.get("/api/edge-messages")
 def edge_messages(
     source: str,
@@ -284,7 +278,6 @@ def edge_messages(
         end_time=end_time,
         keyword=keyword,
     )
-
 
 @router.get("/api/node-messages")
 def node_messages(
@@ -354,4 +347,3 @@ def node_messages(
     )
     with get_driver().session() as session:
         return [dict(r) for r in session.run(query, **params)]
-

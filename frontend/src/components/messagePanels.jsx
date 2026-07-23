@@ -1,6 +1,3 @@
-// ============================================
-
-// ============================================
 
 import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -9,9 +6,6 @@ import { EVENT_RELATED_BY_MESSAGE_ID, SEQ_KINDS } from '../constants.js';
 import { messageNumber } from '../commIdMap.js';
 import { AGENTS } from '../network.jsx';
 
-// ============================================
-
-// ============================================
 export function MessageDetailPanel({ selected, selectedCellData, selectedSemantic, semanticComparisonMode, collapsed, setCollapsed, messages, rounds, selectedMessageId, messageContext, contextStatus, onSelectMessage, onOpenFlow }) {
   if (!selected) {
     return <div className="detail-card empty"><span className="muted">Click a heatmap cell or a time header to see its messages here.</span></div>;
@@ -71,9 +65,6 @@ export function MessageDetailPanel({ selected, selectedCellData, selectedSemanti
   );
 }
 
-// ============================================
-
-// ============================================
 export function MessageList({ messages, selectedMessageId, onSelectMessage, renderExtra }) {
   if (!messages.length) {
     return <p className="muted">No messages matched the current filters.</p>;
@@ -127,9 +118,6 @@ export function MessageList({ messages, selectedMessageId, onSelectMessage, rend
   ));
 }
 
-// ============================================
-
-// ============================================
 export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollapsed, selectedMessageId, messageContext, contextStatus, onSelectMessage, onOpenFlow }) {
   if (!selectedEdge) {
     return <div className="detail-card empty"><span className="muted">Click a network edge to see the messages behind that connection here.</span></div>;
@@ -174,9 +162,7 @@ export function EdgeMessagesPanel({ selectedEdge, messages, collapsed, setCollap
   );
 }
 
-// ============================================
 // Network node click → Node Messages Panel
-// ============================================
 // Bir node seçilince o agent'ın (mevcut network filtresiyle) gönderdiği TÜM
 // mesajları gösterir — reply graph'ta edge'e dönüşmeyen broadcast / root
 // mesajlar dahil. Bu mesajlara daha önce chat panelinden erişilemiyordu.
@@ -229,9 +215,6 @@ export function NodeMessagesPanel({ node, messages, collapsed, setCollapsed, sel
   );
 }
 
-// ============================================
-
-// ============================================
 export function RelatedMessages({ status, context, selectedMessageId, onSelectMessage, onOpenFlow }) {
   if (status === 'loading') {
     return <div className="context-section"><span className="muted">Loading related messages…</span></div>;
@@ -307,9 +290,7 @@ export function RelatedMessages({ status, context, selectedMessageId, onSelectMe
   );
 }
 
-// ============================================
 // Conversation Flow modal (chat-history style)
-// ============================================
 const KIND_TAG = {
   direct: { label: 'direct reply', color: '#22c55e' },
   addressed: { label: 'addressed', color: '#f59e0b' },

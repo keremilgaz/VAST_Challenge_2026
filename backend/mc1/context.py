@@ -1,19 +1,14 @@
-# ============================================================
 # Message Context / Related Messages
-# ============================================================
-#
 
 import re
 from typing import Any, Dict, List, Optional
 
 from .config import CRISIS_KEYWORDS, CHANNEL_WINDOW_MINUTES, NEIGHBOR_COUNT
 
-
 _CRISIS_PATTERNS = [
     (kw, re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE))
     for kw in CRISIS_KEYWORDS
 ]
-
 
 def _keywords_in(text: str) -> List[str]:
     if not text:
@@ -23,7 +18,6 @@ def _keywords_in(text: str) -> List[str]:
         if pat.search(text) and kw not in found:
             found.append(kw)
     return found
-
 
 def _project_related(m: Dict[str, Any], relation_type: str, relation_reason: str) -> Dict[str, Any]:
     return {
@@ -45,7 +39,6 @@ def _project_related(m: Dict[str, Any], relation_type: str, relation_reason: str
         "relation_type": relation_type,
         "relation_reason": relation_reason,
     }
-
 
 def build_reply_thread(
     all_msgs: List[Dict[str, Any]],
@@ -121,7 +114,6 @@ def build_reply_thread(
         out.append(item)
     return out
 
-
 def _parse_ts(value: Optional[str]):
     if not value:
         return None
@@ -130,7 +122,6 @@ def _parse_ts(value: Optional[str]):
         return datetime.fromisoformat(value)
     except Exception:
         return None
-
 
 def _empty_context(message_id: str) -> Dict[str, Any]:
     return {
@@ -146,7 +137,6 @@ def _empty_context(message_id: str) -> Dict[str, Any]:
         "thread": [],
         "requested_message_id": message_id,
     }
-
 
 def build_message_context(
     all_msgs: List[Dict[str, Any]],

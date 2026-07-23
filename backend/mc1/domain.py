@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 import json
 import re
@@ -12,7 +10,6 @@ from .config import (
     SENTIMENT_LABEL_TO_VALUE,
     DATA_PATH,
 )
-
 
 def flatten_internal_state(state: Optional[Dict[str, Any]]) -> Dict[str, str]:
     if not state:
@@ -28,12 +25,10 @@ def flatten_internal_state(state: Optional[Dict[str, Any]]) -> Dict[str, str]:
         "deliberating": state.get("deliberating") or "",
     }
 
-
 def infer_visibility(channel: str, message_type: str) -> str:
     if channel == "official_post" or message_type == "public_post":
         return "external"
     return "internal"
-
 
 def is_merger_related(*texts: str) -> bool:
     haystack = " ".join(t or "" for t in texts).lower()
@@ -41,7 +36,6 @@ def is_merger_related(*texts: str) -> bool:
     keywords = [k.lower() for k in MERGER_KEYWORDS]
 
     return any(k in haystack for k in keywords)
-
 
 def parse_stock_price(value: Any) -> Optional[float]:
     if value is None:
@@ -54,11 +48,9 @@ def parse_stock_price(value: Any) -> Optional[float]:
     except ValueError:
         return None
 
-
 def load_json() -> Dict[str, Any]:
     with DATA_PATH.open("r", encoding="utf-8") as f:
         return json.load(f)
-
 
 def normalize_message_types(message_types: Optional[list[str]], message_type: str = "all") -> list[str]:
     selected = [t for t in (message_types or []) if t and t != "all"]
@@ -68,14 +60,12 @@ def normalize_message_types(message_types: Optional[list[str]], message_type: st
 
     return selected
 
-
 def normalize_text_sources(text_sources: Optional[list[str]]) -> list[str]:
     return [
         source
         for source in (text_sources or [])
         if source in TEXT_SOURCE_OPTIONS
     ]
-
 
 def merger_filter_clause() -> str:
     return """
@@ -94,7 +84,6 @@ def merger_filter_clause() -> str:
           OR ('deliberating' IN $text_sources AND coalesce(m.internal_deliberating_merger_related, false) = true)
       )
     """
-
 
 def keyword_filter_clause() -> str:
     return """
@@ -119,7 +108,6 @@ def keyword_filter_clause() -> str:
       )
     """
 
-
 def keyword_score_expression() -> str:
     return """
      CASE WHEN $keyword <> ''
@@ -140,18 +128,15 @@ def keyword_score_expression() -> str:
           THEN 1 ELSE 0 END
     """
 
-
 def bucket_expression(granularity: str) -> str:
     if granularity == "daily":
         return "substring(m.timestamp_raw, 0, 10)"
     return "substring(m.timestamp_raw, 0, 13) + ':00:00'"
 
-
 def round_bucket_expression(granularity: str) -> str:
     if granularity == "daily":
         return "substring(r.hour, 0, 10)"
     return "substring(r.hour, 0, 13) + ':00:00'"
-
 
 def common_where_clause() -> str:
     return f"""
@@ -171,13 +156,7 @@ def common_where_clause() -> str:
       {keyword_filter_clause()}
     """
 
-
-# ============================================================
-# ============================================================
-#
-#
 _MENTION_RE = re.compile(r"@([A-Za-z_]+)")
-
 
 def _coerce_recipients(value: Any) -> List[str]:
     if value is None:
@@ -194,7 +173,6 @@ def _coerce_recipients(value: Any) -> List[str]:
         return [value] if value else []
     return []
 
-
 def mention_target_agents(text: str) -> List[str]:
     out: List[str] = []
     for tok in _MENTION_RE.findall(text or ""):
@@ -202,7 +180,6 @@ def mention_target_agents(text: str) -> List[str]:
         if agent and agent not in out:
             out.append(agent)
     return out
-
 
 def recipient_target_agents(recipients: Any) -> List[str]:
     out: List[str] = []
@@ -214,7 +191,6 @@ def recipient_target_agents(recipients: Any) -> List[str]:
         if agent and agent not in out:
             out.append(agent)
     return out
-
 
 def resolve_parent_links(all_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ordered = sorted(
@@ -263,7 +239,6 @@ def resolve_parent_links(all_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
     return all_msgs
 
-
 def combine_cell_texts(rows: List[Dict[str, Any]], selected_text_sources: List[str]) -> List[str]:
     use_all = len(selected_text_sources) == 0
     texts: List[str] = []
@@ -285,7 +260,6 @@ def combine_cell_texts(rows: List[Dict[str, Any]], selected_text_sources: List[s
         if joined:
             texts.append(joined)
     return texts
-
 
 def market_sentiment_to_value(label: Optional[str]) -> Optional[float]:
     if not label:

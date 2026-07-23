@@ -1,6 +1,3 @@
-// ============================================
-
-// ============================================
 
 export const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -16,19 +13,13 @@ export const visibilityGroupOf = (ch) => (EXTERNAL_CHANNELS.includes(ch) ? 'exte
 
 export const MERGER_KEYWORDS = ['merger', 'civicloom', 'elenamarquez', 'harborcrest', 'embargo'];
 
-// ============================================
-
-// ============================================
-
 export const CELL = {
   daily: { w: 46, h: 26 },
   hourly: { w: 52, h: 26 },
 };
 export const LABEL_COL = 150;
 
-// ============================================
 // MC1 anlatısının çıpa olayları (event markers)
-// ============================================
 // Timeline / line chart / heatmap'te dikey işaret olarak gösterilir; jürinin
 // "olay nerede?" diye aramasına gerek kalmaz. Zamanlar MC1 brief'inden:
 // ambargo 5 Haziran 2046 18:00'de kalkacaktı, sızıntı ~17:00'de başladı.
@@ -36,10 +27,6 @@ export const EVENT_MARKERS = [
   { id: 'leak',    time: '2046-06-05T17:00:00', short: 'leak',    label: 'Leak: embargoed info appears on FleX (~17:00)', color: '#e24b4a' },
   { id: 'embargo', time: '2046-06-05T18:00:00', short: 'embargo', label: 'Embargo lifts (June 5, 18:00)',                 color: '#f59e0b' },
 ];
-
-// ============================================
-
-// ============================================
 
 export const SEQ_KINDS = {
   decision: { color: '#2dd4bf', shape: 'triangle', label: 'Decision' },

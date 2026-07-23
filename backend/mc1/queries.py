@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +11,6 @@ from .domain import (
     common_where_clause,
     keyword_score_expression,
 )
-
 
 def fetch_messages_for_cell(
     agent_id: str,
@@ -83,7 +80,6 @@ def fetch_messages_for_cell(
             )
         ]
 
-
 def fetch_rows_for_semantic(
     granularity: str,
     start_time: str,
@@ -113,7 +109,6 @@ def fetch_rows_for_semantic(
             )
         ]
 
-
 def build_time_axis(
     granularity: str,
     start_time: str,
@@ -133,7 +128,6 @@ def build_time_axis(
             r["bucket"]
             for r in session.run(query, start_time=start_time, end_time=end_time)
         ]
-
 
 def fetch_all_rows(
     granularity: str,
@@ -175,7 +169,6 @@ def fetch_all_rows(
                 keyword=normalized_keyword,
             )
         ]
-
 
 def fetch_messages_for_edge(
     source_agent_id: str,
@@ -284,7 +277,6 @@ def fetch_messages_for_edge(
 
     with get_driver().session() as session:
         return [dict(r) for r in session.run(query, **params)]
-
 
 def fetch_all_messages_for_context() -> List[Dict[str, Any]]:
     query = """

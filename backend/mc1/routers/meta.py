@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 from fastapi import APIRouter, Query
 
@@ -9,16 +7,13 @@ from ..config import MERGER_KEYWORDS, TEXT_SOURCE_OPTIONS
 
 router = APIRouter()
 
-
 @router.get("/api/health")
 def health():
     return {"ok": True}
 
-
 @router.post("/admin/reload")
 def admin_reload():
     return reset_and_import()
-
 
 @router.get("/api/options")
 def options():
@@ -124,7 +119,6 @@ def options():
         "merger_keywords": MERGER_KEYWORDS,
     }
 
-
 @router.get("/api/timeline")
 def timeline():
     query = """
@@ -161,7 +155,6 @@ def timeline():
             "market_sentiment": r.get("market_sentiment") or "",
         })
     return {"rounds": out}
-
 
 @router.get("/api/rounds")
 def rounds_for_bucket(

@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 import json
 from typing import Any, Dict, List
@@ -13,7 +11,6 @@ from .domain import (
     infer_visibility,
     resolve_parent_links,
 )
-
 
 def reset_and_import() -> Dict[str, int]:
     wait_for_neo4j()

@@ -1,18 +1,8 @@
-// ============================================
 // Stock Price / BERT Sentiment Line Chart
-// ============================================
 
 import React, { useState } from 'react';
 import { CELL, LABEL_COL, EVENT_MARKERS } from '../constants.js';
 import { shortBucket, pctClass, fmtPct, fmtSigned, timeToBucket } from '../utils.js';
-
-// ============================================================
-
-// ============================================================
-
-//
-
-//
 
 //   substring(r.hour,0,13) + ':00:00'
 
@@ -103,10 +93,6 @@ export function StockSentimentLineChart({
   const buckets = data?.time_buckets || [];
   const rawSeries = data?.series || [];
 
-  // ============================================================
-
-  // ============================================================
-
   const series = React.useMemo(() => {
     const s = rawSeries.map((row) => {
       const corr = PRICE_CORRECTIONS[row.time_bucket];
@@ -137,8 +123,6 @@ export function StockSentimentLineChart({
   const innerH = height - padTop - padBottom;
 
   const xAt = (i) => LABEL_COL + i * cell.w + cell.w / 2;
-
-  // ============================================================
 
   const PRICE_AXIS_MAX = 38.70;
   const PRICE_AXIS_MIN = 18.00;

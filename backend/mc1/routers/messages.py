@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 from typing import Optional
 
@@ -11,7 +9,6 @@ from ..context import build_message_context, build_reply_thread, _empty_context
 from ..nlp import extract_embedding_keywords
 
 router = APIRouter()
-
 
 @router.get("/api/messages")
 def messages(
@@ -41,7 +38,6 @@ def messages(
         keyword=keyword,
     )
 
-
 @router.get("/api/messages/{message_id}/context")
 def message_context(message_id: str):
     try:
@@ -53,7 +49,6 @@ def message_context(message_id: str):
     ctx["thread"] = build_reply_thread(all_msgs, message_id)
     return ctx
 
-
 @router.get("/api/message-id-map")
 def message_id_map():
     try:
@@ -61,7 +56,6 @@ def message_id_map():
     except Exception:
         return {}
     return {m["message_id"]: m.get("comm_id") for m in all_msgs if m.get("comm_id") is not None}
-
 
 @router.get("/api/messages-by-ids")
 def messages_by_ids(ids: Optional[list[str]] = Query(default=None)):
@@ -73,7 +67,6 @@ def messages_by_ids(ids: Optional[list[str]] = Query(default=None)):
         return []
     by_id = {m["message_id"]: m for m in all_msgs}
     return [by_id[i] for i in ids if i in by_id]
-
 
 @router.get("/api/keywords")
 def keywords(

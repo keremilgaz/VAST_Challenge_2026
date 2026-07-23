@@ -1,5 +1,3 @@
-# ============================================================
-# ============================================================
 
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +18,6 @@ from ..nlp import get_embedding, sentiment_score
 from ..config import SENTIMENT_LABEL_TO_VALUE
 
 router = APIRouter()
-
 
 @router.get("/api/heatmap")
 def heatmap(
@@ -170,7 +167,6 @@ def heatmap(
             "keyword": normalized_keyword,
         },
     }
-
 
 @router.get("/api/line-chart")
 def line_chart(

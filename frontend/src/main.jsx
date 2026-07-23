@@ -1,10 +1,3 @@
-// ============================================
-
-// ============================================
-
-//
-
-// ============================================
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -110,11 +103,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
 
-  // ============================================
-
-  // ============================================
-
-  // ============================================
   const timelineEnd = (timeline.length && timeline[timelineIdx])
     ? (timeline[timelineIdx].cutoff || timeline[timelineIdx].hour || '')
     : '';
@@ -135,9 +123,6 @@ function App() {
     return p.toString();
   }, [granularity, mergerOnly, selectedCombos, selectedTextSources, searchKeyword, timelineStart, timelineEnd]);
 
-  // ============================================
-
-  // ============================================
   const networkQuery = useMemo(() => {
     const p = new URLSearchParams();
     p.set('granularity', granularity);
@@ -163,9 +148,6 @@ function App() {
       netMergerOnly, netCombos,
       timelineStart, timelineEnd]);
 
-  // ============================================
-
-  // ============================================
   async function loadOptions() {
     try {
       const res = await fetch(`${API}/api/options`);
@@ -285,18 +267,12 @@ function App() {
     setPlaying(p => !p);
   };
 
-  // ============================================
   // cellMap (agent|bucket -> cell)
-  // ============================================
   const cellMap = useMemo(() => {
     const map = new Map();
     for (const c of heatmap.cells || []) map.set(`${c.agent_id}|${c.bucket}`, c);
     return map;
   }, [heatmap]);
-
-  // ============================================
-
-  // ============================================
 
   const sortedAgents = useMemo(() => {
     let agents = (heatmap.agents || []).slice();
@@ -331,9 +307,7 @@ function App() {
     return agents;
   }, [heatmap, cellMap, heatmapSort, agentFilter]);
 
-  // ============================================
   // toggles
-  // ============================================
 
   const isInSet = (selection, item) => selection.length === 0 || selection.includes(item);
   const toggleInSet = (setter, allItems, item) => setter(prev => {
@@ -343,10 +317,6 @@ function App() {
     return next;
   });
   const agentIds = () => (options.agents || []).map(a => a.agent_id);
-
-  // ============================================================
-
-  // ============================================================
 
   const comboOptions = useMemo(() => {
     const list = options.channel_types || [];
@@ -410,10 +380,6 @@ function App() {
   };
   const toggleAgent = (id) => toggleInSet(setAgentFilter, agentIds(), id);
 
-  // ============================================
-
-  // ============================================
-
   const heatmapScrollRef = useRef(null);
   const lineScrollRef = useRef(null);
   const seqScrollRef = useRef(null);
@@ -470,9 +436,7 @@ function App() {
     if (timeline.length) setTimelineIdx(timeline.length - 1);
   };
 
-  // ============================================
   // heatmap cell click → message detail
-  // ============================================
   async function selectCell(agent, bucket) {
     setSelected({ agent, bucket });
     setIsMessageDetailCollapsed(false);
@@ -504,10 +468,6 @@ function App() {
       setStatus('Could not load message details (is the backend running?).');
     }
   }
-
-  // ============================================
-
-  // ============================================
 
   const handleSelectNode = useCallback((id) => {
     setSelectedNetworkNode(prev => (prev === id ? null : id));

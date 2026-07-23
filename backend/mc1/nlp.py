@@ -1,6 +1,3 @@
-# ============================================================
-# ============================================================
-#
 
 import hashlib
 from typing import Dict, List, Optional
@@ -8,7 +5,6 @@ from typing import Dict, List, Optional
 from sklearn.feature_extraction.text import CountVectorizer, HashingVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-
 
 _embedding_model = None
 _embedding_model_failed = False
@@ -20,10 +16,8 @@ _sentiment_cache: Dict[str, float] = {}
 _sentiment_pipeline = None
 _sentiment_pipeline_failed = False
 
-
 def _text_hash(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
-
 
 def get_embedding_model():
     global _embedding_model, _embedding_model_failed
@@ -37,8 +31,6 @@ def get_embedding_model():
         _embedding_model = None
     return _embedding_model
 
-
-#
 _fallback_vectorizer = HashingVectorizer(
     n_features=512,
     analyzer="char_wb",
@@ -46,7 +38,6 @@ _fallback_vectorizer = HashingVectorizer(
     alternate_sign=False,
     norm="l2",
 )
-
 
 def _fallback_embedding(text: str) -> Optional[np.ndarray]:
     if not text or not text.strip():
@@ -59,7 +50,6 @@ def _fallback_embedding(text: str) -> Optional[np.ndarray]:
         return arr
     except Exception:
         return None
-
 
 def get_embedding(text: str) -> Optional[np.ndarray]:
     key = _text_hash(text)
@@ -79,7 +69,6 @@ def get_embedding(text: str) -> Optional[np.ndarray]:
     _embedding_cache[key] = emb
     return emb
 
-
 def get_sentiment_pipeline():
     global _sentiment_pipeline, _sentiment_pipeline_failed
     if _sentiment_pipeline is not None or _sentiment_pipeline_failed:
@@ -96,7 +85,6 @@ def get_sentiment_pipeline():
         _sentiment_pipeline = None
     return _sentiment_pipeline
 
-
 _POS_WORDS = {
     "good", "great", "excellent", "positive", "confident", "calm", "agree",
     "support", "win", "success", "improve", "resolve", "safe", "clear",
@@ -109,7 +97,6 @@ _NEG_WORDS = {
     "critical", "embargo", "investigation", "viral", "backlash",
 }
 
-
 def _lexicon_sentiment(text: str) -> float:
     tokens = [t.strip(".,!?;:'\"()").lower() for t in text.split()]
     pos = sum(1 for t in tokens if t in _POS_WORDS)
@@ -117,7 +104,6 @@ def _lexicon_sentiment(text: str) -> float:
     if pos + neg == 0:
         return 0.0
     return (pos - neg) / (pos + neg)
-
 
 def sentiment_score(text: str) -> Optional[float]:
     if not text or not text.strip():
@@ -142,7 +128,6 @@ def sentiment_score(text: str) -> Optional[float]:
     val = _lexicon_sentiment(text)
     _sentiment_cache[key] = val
     return val
-
 
 def extract_embedding_keywords(
         texts: list[str],
