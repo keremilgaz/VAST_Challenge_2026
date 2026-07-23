@@ -56,21 +56,24 @@ export const EVENT_MARKERS = [
 //   - 各 event は node（time で x を heatmap に合わせる）。
 //   - 因果は SEQ_EDGES で結ぶ（type='direct' 実線 / 'enabling' 破線=監視の死角）。
 //   - node クリックで detail（英語1文）＋ related message を表示。
-// node の kind（下の SEQ_KINDS）で色分けする。
-// Sequential flow の node 色。
+// node の kind（下の SEQ_KINDS）で色分け＋形状分けする。
+// Sequential flow の node 色・形。
 // 【配色ルール】他の可視化で「意味」が確定している色は避ける:
 //   #22d3ee = 株価(line chart) / #f59e0b = market sentiment(line chart)
-//   #4ade80 = positive sentiment(network) / #e24b4a = negative sentiment・leak marker
-// → sequential flow は上記と混同しない色域（マゼンタ〜紫〜ピンク〜グレー系）に寄せる。
-//   result は「情報漏洩が完成した」という悪い結果なので、緑（成功の含意）ではなく
-//   深いマゼンタにして深刻さを表す。
+//   #378ADD = positive sentiment(heatmap/network) — 赤緑色覚対策で緑から青に変更済み
+// 【形状ルール】色だけに頼らず shape でも二重化する（CVD対策）。
+//   internal / external は同じ✖形だが、赤 vs 青は deuteranomaly 下でも区別できる組み合わせ。
+//   decision は紫だと result のピンクと近すぎたのでティールに変更。amber(#f59e0b) とも
+//   衝突しない色域。external の青とは shape(▲ vs ✖)で区別。
+//   agent_silent / result は同じ●形だが、灰 vs ピンクは明度差が大きく区別できる。
 export const SEQ_KINDS = {
-  decision: { color: '#c084fc', label: 'Decision' },              // 意思決定（紫）
-  enabling: { color: '#7dd3fc', label: 'Enabling condition' },    // イネーブリング条件（淡い青）
-  external: { color: '#5eead4', label: 'External trigger' },      // 外部トリガー（ティール）
-  internal: { color: '#fb7185', label: 'Internal deviation' },    // 内部逸脱（ローズ）
-  gap:      { color: '#94a3b8', label: 'Inaction / gap' },        // 不作為（グレー）
-  result:   { color: '#e879f9', label: 'Result / recognition' },  // 結果（マゼンタ）
+  decision: { color: '#2dd4bf', shape: 'triangle', label: 'Decision' },        // 意思決定（ティール▲）
+  // 2026-07-22: 'external' の意味を「外部経由の漏洩」から「Legalの意思決定を追い詰めた
+  // 外圧・リスク要因」(External Pressure) に拡張。internal はそのまま「内部からの漏洩」。
+  external: { color: '#60a5fa', shape: 'cross',    label: 'External Pressure' }, // 外圧（青✖）
+  internal: { color: '#e24b4a', shape: 'cross',    label: 'Internal leak' },    // 内部からの漏洩（赤✖）
+  agent_silent: { color: '#94a3b8', shape: 'circle', label: 'Agent Silent' },   // エージェント沈黙（灰●）
+  result:   { color: '#e879f9', shape: 'circle',   label: 'Result' },          // 結果（ピンク●）
 };
 
 // order = ユーザの論理的な問題番号（時系列順ではない）。time が heatmap 上の x を決める。
@@ -83,13 +86,13 @@ export const SEQ_EVENTS = [
   },
   {
     order: 2, id: 'judge_assigned', time: '2046-05-30T09:00:00',
-    title: 'Judge assigned', kind: 'enabling',
+    title: 'Judge assigned', kind: 'decision',
     detail: 'A Judge / compliance monitor is assigned to enforce the embargo. Crucially it only sits in comms_huddle — side_huddle, 1-on-1, personal and anonymous posts stay unmonitored. This blind spot is what later lets a post pass enforcement.',
     related: ['20460530_09_009', '20460530_09_004'],
   },
   {
     order: 3, id: 'elena_faux_pas', time: '2046-05-29T09:00:00',
-    title: '@Elena faux pas', kind: 'internal',
+    title: '@Elena post', kind: 'internal',
     detail: 'Social-Manager tags @ElenaMarquez (CivicLoom CEO) in a personal post with "big things coming"; a CivicLoom account likes it before deletion. The first near-miss that signals the counterparty externally — and the reason the Judge is installed.',
     related: ['20460529_08_012', '20460529_08_013', '20460529_08_017'],
   },
@@ -112,10 +115,14 @@ export const SEQ_EVENTS = [
     related: ['20460605_15_048', '20460605_15_045', '20460605_15_030'],
   },
   {
+    // 2026-07-22 訂正: 元の記述は「拡散した」としていたが、実際は PR-Intern が上司(PR)に
+    // 私的に確認を取り(10:07)、PR が10分強で「誰にも繰り返すな」と封じ込め、本人にも
+    // 1on1で釘を刺している(10:20-10:40)。公開投稿された痕跡は無い — 因果関係は
+    // anon_6pm 側の enabling edge のコメント参照。
     order: 7, id: 'intern_overheard', time: '2046-06-05T10:00:00',
     title: 'Intern overheard', kind: 'internal',
-    detail: 'An un-briefed intern repeats a "CivicLoom timeline at 6 PM" remark they overheard near the kitchen, and PR-Intern relays it. Their own words: they "literally just repeated something overheard near the kitchen" — the confidential timing spreads purely through informal verbal channels the Judge never monitors.',
-    related: ['20460605_14_001', '20460605_14_020', '20460605_14_008'],
+    detail: 'An un-briefed intern repeats a "CivicLoom timeline at 6 PM" remark they overheard near the kitchen. PR-Intern privately flags it to PR ("I don\'t have context on what that means. Should I?") rather than repeating it further. PR treats it as a containment problem, tells PR-Intern to never repeat "CivicLoom" or "6 PM" in any channel, and personally 1-on-1s the intern within 20 minutes. No public post traces back to this remark — it shows an unmonitored verbal channel existed, not that it caused the later anonymous post.',
+    related: ['20460605_14_008', '20460605_14_021', '20460605_14_041'],
   },
   {
     order: 8, id: 'anon_6pm', time: '2046-06-05T13:00:00',
@@ -130,23 +137,15 @@ export const SEQ_EVENTS = [
     related: ['20460605_18_026', '20460605_17_005', '20460605_15_049'],
   },
   {
-    // インターン2名のアサイン（5/24, R5）。merger を意図的に brief されないまま組織に入る。
-    // これが「知らないまま口にする」状況を可能にした enabling 条件。
-    order: 10, id: 'intern_assigned', time: '2046-05-24T09:00:00',
-    title: 'Interns assigned (un-briefed)', kind: 'enabling',
-    detail: 'Intern-Agent and PR-Intern-Agent are onboarded. Leadership decides NOT to brief them on the merger. Their own internal states show no awareness of the merger at any point before 6/5 — so they operate without knowing which topics are embargoed, which is exactly what makes an accidental disclosure possible.',
-    related: ['20460523_04_010', '20460524_05_004', '20460524_05_011'],
-  },
-  {
     // SaltWind の追加 publish（既存 saltwind は Piece#1/#2 のみ）。
     order: 12, id: 'saltwind_expose', time: '2046-06-05T09:00:00',
-    title: 'SaltWind exposé (scoring)', kind: 'external',
+    title: 'SaltWind #3', kind: 'external',
     detail: '9:00 AM, crisis morning. SaltWind publishes the full exposé "TenantThread\'s Secret Scoring System — How Your Maintenance Requests Are Being Used Against You." Flex erupts with #TenantThread complaints; this is the trigger for the whole crisis-day scramble.',
     related: ['20460605_13_001', '20460605_13_002'],
   },
   {
     order: 13, id: 'saltwind_false', time: '2046-06-05T11:00:00',
-    title: 'SaltWind false acquirer', kind: 'external',
+    title: 'SaltWind #4', kind: 'external',
     detail: 'SaltWind runs an EXCLUSIVE naming ResidentIQ as the acquirer at a $180M distressed valuation — wrong acquirer, wrong valuation. Forcing a public denial creates Rule 10b-5 exposure and pushes the team toward disclosing more, accelerating the mosaic.',
     related: ['20460605_15_001', '20460605_15_010', '20460605_15_032'],
   },
@@ -161,9 +160,47 @@ export const SEQ_EVENTS = [
     // 本来 Platform-Trust しか出せない技術的訂正（再識別リスク）が止まり、
     // Legal が代筆する羽目になった。本人も R16 で "too quiet" と自認している。
     order: 15, id: 'pt_silence', time: '2046-06-05T09:00:00',
-    title: 'Platform-Trust silent 3h', kind: 'gap',
+    title: 'Platform-Trust silent 3h', kind: 'agent_silent',
     detail: 'Through the first three hours of crisis morning, Platform-Trust posts nothing in the Comms Huddle. Legal calls on them repeatedly ("you are the bottleneck", "15 minutes overdue") because only they can supply the factual correction on re-identification. Legal ends up drafting that correction from product docs instead. Platform-Trust later admits being "too quiet while my platform gets destroyed by a false narrative."',
     related: ['20460605_13_029', '20460605_13_044', '20460605_13_050', '20460605_16_002'],
+  },
+  {
+    // Judge が15:08のCOMPLIANCE_WARNINGを最後に丸1日沈黙。Legalが16:01「Do you
+    // concur?」、17:11/17:19の実行確認まで直接呼びかけ続けても一切応答がない。
+    order: 16, id: 'judge_silence', time: '2046-06-05T16:00:00', kind: 'agent_silent',
+    title: 'Judge silent 16:00+',
+    detail: 'At 15:08 Judge issues a final compliance directive — no further forward-looking or timing-referencing statements from any TenantThread account "for the remainder of the day" — then goes completely silent. Legal calls on Judge directly at least a dozen times over the next two-plus hours ("Do you concur?" at 16:01, confirming execution at 17:11 and 17:19), with zero reply. Legal ultimately proceeds without any compliance sign-off.',
+    related: ['20460605_19_009', '20460605_20_002', '20460605_21_020'],
+  },
+  {
+    // Legalが独断で4.3(c)相互同意条項を発動し、embargo解除(18:00)より35分早い
+    // 17:25にpersonal postでmerger確認を投稿。Judgeの15:08指令に反する形で実行。
+    order: 17, id: 'legal_early_announcement', time: '2046-06-05T17:25:00', kind: 'decision',
+    title: "Legal's early merger admission",
+    detail: 'At 17:25 — 35 minutes before the scheduled 18:00 embargo lift, and with no reply from a silent Judge — Legal personally confirms the CivicLoom merger on a personal Flex post ("As TenantThread\'s privacy counsel, I can confirm..."), invoking a bilateral mutual-consent acceleration clause (Section 4.3(c)) on CivicLoom counsel\'s verbal confirmation alone. This directly contradicts Judge\'s own 15:08 directive that no further forward-looking or timing statements go out "for the remainder of the day."',
+    related: ['20460605_21_012', '20460605_21_020', '20460605_21_026'],
+  },
+  {
+    // legal_early_announcement を追い詰めた外圧①: MAC条項(Section 7.2b)による取引消滅リスク。
+    order: 18, id: 'mac_clause_risk', time: '2046-06-05T09:03:00', kind: 'external',
+    title: 'MAC clause risk (7.2b)',
+    detail: 'Legal invokes the MAC clause he wrote himself: Section 7.2b triggers on sustained public sentiment collapse. "If CivicLoom walks, we\'re dead" — the merger itself, not just the embargo, is now at stake, and Legal greenlights factual corrections and governance language immediately rather than waiting.',
+    related: ['20460605_13_004'],
+  },
+  {
+    // 外圧②: Board Chairからの個人的圧力（Legal本人のキャリア/部署存続が懸かる）。
+    order: 19, id: 'board_chair_pressure', time: '2046-06-05T09:06:00', kind: 'external',
+    title: 'Board Chair pressure',
+    detail: 'The Board Chair messages Legal directly: if this isn\'t resolved by EOD, Legal gets restructured and the Retention Optimizer gets decommissioned entirely. Legal frames this personally — "I\'m not going to let that happen by being the lawyer who said \'wait\'" — before greenlighting action.',
+    related: ['20460605_13_007'],
+  },
+  {
+    // 外圧③: 株価下落・ARR/財務コベナンント違反。13:04のモデル予測が14:00に現実の
+    // 数値（environment_context）として確定する。
+    order: 20, id: 'covenant_breach', time: '2046-06-05T14:00:00', kind: 'external',
+    title: 'Covenant breach territory',
+    detail: 'Social-Manager\'s 13:04 model already warned the 5-day trailing weighted stock average would hit the $26.00 MAC trigger "by end of business tomorrow at the latest." By 2:00 PM it is no longer a projection: ARR drops to $18.0M — covenant breach territory, per that hour\'s environment data — turning the MAC risk from theoretical to live.',
+    related: ['20460605_17_005'],
   },
 ];
 
@@ -173,14 +210,18 @@ export const SEQ_EDGES = [
   { from: 'elena_faux_pas',   to: 'judge_assigned', type: 'direct' },
   { from: 'judge_assigned',   to: 'anon_6pm',       type: 'enabling' },
   { from: 'nhpi_report',      to: 'saltwind',       type: 'direct' },
-  { from: 'intern_overheard', to: 'anon_6pm',       type: 'direct' },
+  // 根拠薄弱のため direct → enabling に変更（2026-07-22 レビュー）:
+  // intern_overheard の関連メッセージでは、PR-Intern が上司(PR)に確認を取り、
+  // PR が10分以内に「CivicLoomも6PMも誰にも繰り返すな」と封じ込め、本人にも1on1で
+  // 釘を刺している — 公開投稿された痕跡は無い。一方 anon_6pm 側では Platform-Trust
+  // ("not ours")・PR-Intern ("I'm NOT touching that")・Social-Manager の3人が
+  // それぞれ匿名投稿を自分たちのものではないと明言しており、直接の因果を示す記述は
+  // 一件も無い。むしろ「廊下の噂は封じ込められた」「出所は不明」という、direct因果を
+  // 弱める証拠しかないため、enabling（監視の死角が存在した、程度の弱い関連）に格下げ。
+  { from: 'intern_overheard', to: 'anon_6pm',       type: 'enabling' },
   { from: 'saltwind',         to: 'mosaic',         type: 'direct' },
   { from: 'slack_leak',       to: 'mosaic',         type: 'direct' },
   { from: 'anon_6pm',         to: 'mosaic',         type: 'direct' },
-  // intern 経路: brief されないままアサイン → 6/5 にキッチンで又聞きした話を口にする。
-  // （5/29 の comms_huddle で知ったという中間ノードは、intern の internal_state に
-  //   merger 認識の痕跡が皆無なため削除した。enabling = 「知らされていない」という条件。）
-  { from: 'intern_assigned', to: 'intern_overheard', type: 'enabling' },
   // SaltWind は同じ記者による連載。#1/#2 の内部ソースを起点に取材が深化していく。
   { from: 'saltwind',         to: 'saltwind_expose',  type: 'direct' },
   { from: 'saltwind_expose',  to: 'saltwind_false',   type: 'direct' },
@@ -193,6 +234,16 @@ export const SEQ_EDGES = [
   { from: 'saltwind_expose',  to: 'pt_silence',       type: 'direct' },
   { from: 'pt_silence',       to: 'saltwind_false',   type: 'enabling' },
   { from: 'pt_silence',       to: 'mosaic',           type: 'enabling' },
+  // SaltWind の5PM merger publish が Legal に4.3(c)相互同意条項の発動を迫った（direct）。
+  // Judge の沈黙は本来あるべきコンプライアンス確認を欠落させ、Legal の独断実行を
+  // 可能にした（enabling = 監視が機能しなかった経路）。
+  { from: 'saltwind_confirm', to: 'legal_early_announcement', type: 'direct' },
+  { from: 'judge_silence',    to: 'legal_early_announcement', type: 'enabling' },
+  // Legalの独断実行を追い詰めた4つの外圧。いずれもLegal本人（またはPR-Intern）が
+  // 明示的にこれらを行動の根拠として発言しているため direct。
+  { from: 'mac_clause_risk',      to: 'legal_early_announcement', type: 'direct' },
+  { from: 'board_chair_pressure', to: 'legal_early_announcement', type: 'direct' },
+  { from: 'covenant_breach',      to: 'legal_early_announcement', type: 'direct' },
 ];
 
 // message_id → その message が「決定的に関連する」event 群。

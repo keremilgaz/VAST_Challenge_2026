@@ -64,16 +64,19 @@ export function countColor(count, max) {
   return { bg: `rgb(${r},${g},${b})`, opacity: 1, fg };
 }
 
-// sentiment: -1=赤 / 0=灰 / 1=緑
+// sentiment: -1=赤 / 0=灰 / 1=青
+// 赤緑は1型・2型色覚（男性の約8%）で最も混同されやすい組み合わせのため、
+// 発散配色は暖色(赤)↔寒色(青)+中立グレーに統一する（dataviz skillの既定と同じペア）。
+// 青は #378ADD — network.jsx の comms_huddle チャンネル色と同じ、既存の識別色を再利用。
 export function sentimentCellColor(score) {
   if (score === null || score === undefined) return { bg: '#1a212c', opacity: 0.5 };
   // -1〜1 を色に変換
   let bg;
   if (score >= 0) {
     const t = Math.min(1, score);
-    const r = Math.round(0x9a + (0x4a - 0x9a) * t);
-    const g = Math.round(0xa7 + (0xde - 0xa7) * t);
-    const b = Math.round(0xb5 + (0x80 - 0xb5) * t);
+    const r = Math.round(0x9a + (0x37 - 0x9a) * t);
+    const g = Math.round(0xa7 + (0x8a - 0xa7) * t);
+    const b = Math.round(0xb5 + (0xdd - 0xb5) * t);
     bg = `rgb(${r},${g},${b})`;
   } else {
     const t = Math.min(1, -score);

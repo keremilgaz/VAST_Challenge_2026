@@ -12,6 +12,35 @@ import React, { useMemo, useState } from 'react';
 import { CELL, LABEL_COL, SEQ_EVENTS, SEQ_EDGES, SEQ_KINDS } from '../constants.js';
 import { timeToBucket, shortBucket } from '../utils.js';
 import { MessageList } from './messagePanels.jsx';
+// agent 識別アイコン。heatmap / network の agent filter と同じ
+// <AgentIcon id={agent_id} /> {agent_label} の並びを再利用する（表示層のみ）。
+import { AgentIcon } from '../agentIcons.jsx';
+
+// kind.shape === 'triangle' 用の頂点座標（上向き正三角形）。
+function trianglePoints(cx, cy, r) {
+  return [-90, 150, 30].map(deg => {
+    const rad = (deg * Math.PI) / 180;
+    return `${cx + r * Math.cos(rad)},${cy + r * Math.sin(rad)}`;
+  }).join(' ');
+}
+
+// legend / detail header で使う shape アイコン（HTML コンテキスト用の小さな SVG）。
+function KindIcon({ kind, size = 12 }) {
+  const c = size / 2;
+  const r = size * 0.42;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ verticalAlign: -1, flexShrink: 0 }}>
+      {kind.shape === 'circle' && <circle cx={c} cy={c} r={r} fill={kind.color} />}
+      {kind.shape === 'triangle' && <polygon points={trianglePoints(c, c, r * 1.15)} fill={kind.color} />}
+      {kind.shape === 'cross' && (
+        <g stroke={kind.color} strokeWidth={Math.max(2, size * 0.22)} strokeLinecap="round">
+          <line x1={c - r * 0.75} y1={c - r * 0.75} x2={c + r * 0.75} y2={c + r * 0.75} />
+          <line x1={c - r * 0.75} y1={c + r * 0.75} x2={c + r * 0.75} y2={c - r * 0.75} />
+        </g>
+      )}
+    </svg>
+  );
+}
 
 export function SequentialFlow({
   granularity, buckets, scrollRef, onScroll,
@@ -25,19 +54,40 @@ export function SequentialFlow({
 
   // ホバー中の node（現在はラベル常時表示なので、強調用途のみ）。
   const [hoveredId, setHoveredId] = useState(null);
+  // legend のチェックボックスで非表示にした kind の集合。
+  const [hiddenKinds, setHiddenKinds] = useState(() => new Set());
+  // legend のチェックボックスで非表示にした edge type（'direct' / 'enabling'）の集合。
+  const [hiddenEdgeTypes, setHiddenEdgeTypes] = useState(() => new Set());
+  // "Event names" チェック時はラベルを常時表示（縦幅は自動で伸びる）。
+  const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
+
+  const toggleKind = (k) => setHiddenKinds(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+  const toggleEdgeType = (t) => setHiddenEdgeTypes(prev => {
+    const next = new Set(prev);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    return next;
+  });
 
   const R = 9; // node 半径（小さくして縦幅を抑える）
 
   // 各 event を現在の time 窓の bucket index に解決（窓外なら描かない）。
-  // ラベルはホバー/選択時のみ出すので、段(stack)割り当ては node の幅だけで判定する。
-  // これにより縦幅が最小になる（常時ラベルだと daily で 7 段 ≒ 366px 必要だった）。
+  // 通常はラベルがホバー表示なので、段(stack)割り当ては node の幅だけで判定して縦幅を最小化する。
+  // alwaysShowLabels のときは全ノードのラベルが常時出るので、ラベル幅で段を割り当てる
+  // （そのぶん段数＝縦幅が増えるが、ラベル同士の重なりを防ぐには必要）。
   const placed = useMemo(() => {
     const arr = [];
     for (const ev of SEQ_EVENTS) {
+      if (hiddenKinds.has(ev.kind)) continue;
       const bi = (buckets || []).indexOf(timeToBucket(ev.time, granularity));
       if (bi < 0) continue;
       const x = xAt(bi);
-      const w = 2 * R + 6;
+      const w = alwaysShowLabels
+        ? Math.max(2 * R + 6, ev.title.length * 6.2 + 14)
+        : 2 * R + 6;
       arr.push({ ...ev, bi, x, left: x - w / 2, right: x + w / 2, stack: 0 });
     }
     arr.sort((a, b) => a.left - b.left || a.bi - b.bi);
@@ -52,7 +102,7 @@ export function SequentialFlow({
     }
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buckets, granularity]);
+  }, [buckets, granularity, hiddenKinds, alwaysShowLabels]);
 
   const posById = useMemo(() => {
     const m = new Map();
@@ -64,6 +114,7 @@ export function SequentialFlow({
   const arcs = useMemo(() => {
     const es = [];
     for (const e of SEQ_EDGES) {
+      if (hiddenEdgeTypes.has(e.type)) continue;
       const a = posById.get(e.from), b = posById.get(e.to);
       if (!a || !b) continue;
       es.push({ ...e, a, b, x1: Math.min(a.x, b.x), x2: Math.max(a.x, b.x) });
@@ -104,18 +155,22 @@ export function SequentialFlow({
       arc.dxOut = arc.dxOut || 0;
     }
     return es;
-  }, [posById]);
+  }, [posById, hiddenEdgeTypes]);
 
   const maxTier = arcs.reduce((mx, a) => Math.max(mx, a.tier), -1);
   const tierH = 12;
   const arcRegionH = (maxTier + 1) * tierH + 10;
-  const stackGap = 2 * R + 6; // node のみ（ラベルはホバー表示）なので詰められる
+  // 通常は node のみ（ラベルはホバー表示）なので詰められる。
+  // alwaysShowLabels のときは各段に「node + その下のラベル」が入るので広げる。
+  const stackGap = alwaysShowLabels ? 2 * R + 26 : 2 * R + 6;
   const nodeBaseY = arcRegionH + R + 4;
   const maxStack = placed.reduce((mx, p) => Math.max(mx, p.stack || 0), 0);
   // 下部に time 軸（heatmap と同じ bucket）。
   // hourly のときだけ日境界の日付ラベルを軸線の上に出すので、その分の余白を確保する。
   const dayLabelPad = granularity === 'hourly' ? 16 : 4;
-  const axisTop = nodeBaseY + R + maxStack * stackGap + dayLabelPad;
+  // 常時ラベル時は最下段の node の下にもラベルが出るので、その高さを足す。
+  const labelPad = alwaysShowLabels ? 22 : 0;
+  const axisTop = nodeBaseY + R + maxStack * stackGap + labelPad + dayLabelPad;
   const axisH = 22;
   const svgH = axisTop + axisH;
   const nodeY = (p) => nodeBaseY + (p.stack || 0) * stackGap;
@@ -123,10 +178,23 @@ export function SequentialFlow({
   // ホバーラベル用に右端の余白を少し確保する。
   const rightPad = 12;
 
-  const selEvent = selectedEventId
+  const selEventRaw = selectedEventId
     ? (posById.get(selectedEventId) || SEQ_EVENTS.find(e => e.id === selectedEventId))
     : null;
+  // kind を非表示にしたら、その node の detail パネルも閉じる（表示との齟齬を防ぐ）。
+  const selEvent = selEventRaw && hiddenKinds.has(selEventRaw.kind) ? null : selEventRaw;
   const selKind = selEvent ? (SEQ_KINDS[selEvent.kind] || SEQ_KINDS.decision) : null;
+
+  // 選択中 event に「決定的に関連する message」の送信 agent を重複排除して集める。
+  // eventMessages は selEvent.related の message_id 群を fetch した実データ（agent_id /
+  // agent_label 付き）なので、ここから素直に導出できる（新しい agent マッピングは作らない）。
+  const involvedAgents = useMemo(() => {
+    const seen = new Map();
+    for (const m of eventMessages || []) {
+      if (m.agent_id && !seen.has(m.agent_id)) seen.set(m.agent_id, m.agent_label || m.agent_id);
+    }
+    return [...seen.entries()].map(([agent_id, agent_label]) => ({ agent_id, agent_label }));
+  }, [eventMessages]);
 
   return (
     <div className="seqflow-card">
@@ -134,7 +202,7 @@ export function SequentialFlow({
         <h3>Sequence of events → the release past embargo enforcement</h3>
         <span className="muted small seqflow-hint"
           title="Nodes = key events, positioned on the same time buckets as the heatmap below. Lines = causal links; dashed lines are enabling conditions / monitoring blind-spots rather than direct causes.">
-          hover a node for its name · click for details
+          {alwaysShowLabels ? 'click a node for details' : 'hover a node for its name · click for details'}
         </span>
       </div>
 
@@ -182,7 +250,9 @@ export function SequentialFlow({
             );
           })}
 
-          {/* event node（ラベルはホバー/選択時のみ → 縦幅を最小化） */}
+          {/* event node。kind.shape に応じて ▲/✖/● を描き分ける。
+              当たり判定は常に透明円で確保し、強調（選択/ホバー）は shape 自身に効かせる。
+              ●以外に円のリングを描くと「丸い枠線」が浮いて見えるため描かない。 */}
           {placed.map(p => {
             const y = nodeY(p);
             const kind = SEQ_KINDS[p.kind] || SEQ_KINDS.decision;
@@ -193,6 +263,11 @@ export function SequentialFlow({
             const connected = focusId && arcs.some(a =>
               (a.from === focusId && a.to === p.id) || (a.to === focusId && a.from === p.id));
             const dimmed = focusId && !connected && focusId !== p.id;
+            const active = sel || hov;
+            const rr = active ? R + 2 : R;
+            // shape 自身に付ける輪郭（強調時のみ白、connected は淡い青）
+            const glyphStroke = active ? '#ffffff' : (connected ? '#c3cee0' : 'none');
+            const glyphStrokeW = active ? 1.5 : (connected ? 1 : 0);
             return (
               <g key={p.id} style={{ cursor: 'pointer' }}
                 opacity={dimmed ? 0.28 : 1}
@@ -200,9 +275,23 @@ export function SequentialFlow({
                 onMouseEnter={() => setHoveredId(p.id)}
                 onMouseLeave={() => setHoveredId(cur => (cur === p.id ? null : cur))}>
                 <title>{p.title}</title>
-                <circle cx={p.x} cy={y} r={sel || hov ? R + 2 : R} fill={kind.color}
-                  stroke={sel || hov ? '#ffffff' : (connected ? '#c3cee0' : '#0b1622')}
-                  strokeWidth={sel || hov ? 2 : (connected ? 1.5 : 1)} />
+                {/* 当たり判定（不可視・常に円形で掴みやすくする） */}
+                <circle cx={p.x} cy={y} r={R + 4} fill="transparent" stroke="none" />
+                {kind.shape === 'circle' && (
+                  <circle cx={p.x} cy={y} r={rr} fill={kind.color}
+                    stroke={active ? '#ffffff' : (connected ? '#c3cee0' : '#0b1622')}
+                    strokeWidth={active ? 2 : (connected ? 1.5 : 1)} />
+                )}
+                {kind.shape === 'triangle' && (
+                  <polygon points={trianglePoints(p.x, y, rr * 0.95)} fill={kind.color}
+                    stroke={glyphStroke} strokeWidth={glyphStrokeW} strokeLinejoin="round" />
+                )}
+                {kind.shape === 'cross' && (
+                  <g stroke={kind.color} strokeWidth={active ? 3.6 : 3} strokeLinecap="round">
+                    <line x1={p.x - rr * 0.72} y1={y - rr * 0.72} x2={p.x + rr * 0.72} y2={y + rr * 0.72} />
+                    <line x1={p.x - rr * 0.72} y1={y + rr * 0.72} x2={p.x + rr * 0.72} y2={y - rr * 0.72} />
+                  </g>
+                )}
               </g>
             );
           })}
@@ -245,10 +334,38 @@ export function SequentialFlow({
             })}
           </g>
 
-          {/* ラベル: hover(なければ selected) の node と、因果で直接つながる node を同時に表示。
-              つながり先の名前も読めるので「どこからどこへ」が追える。
-              ラベル同士は当たり判定で上下に逃がして重ならないようにする。 */}
+          {/* ラベル。
+              alwaysShowLabels: 全 node のラベルを各 node の直下に常時表示（段組みで重なりを回避済み）。
+              通常時: hover(なければ selected) の node と、因果で直接つながる node のみ表示。 */}
           {(() => {
+            const rightEdge = LABEL_COL + plotW + rightPad;
+
+            if (alwaysShowLabels) {
+              return (
+                <g pointerEvents="none">
+                  {placed.map(p => {
+                    const focusId = hoveredId || selectedEventId;
+                    const isFocus = focusId === p.id;
+                    const w = Math.max(40, p.title.length * 6.2 + 14);
+                    let bx = p.x - w / 2;
+                    if (bx + w > rightEdge) bx = rightEdge - w;
+                    if (bx < 2) bx = 2;
+                    const by = nodeY(p) + R + 4;
+                    return (
+                      <g key={p.id}>
+                        <rect x={bx} y={by} width={w} height={20} rx={5}
+                          fill="#0b1622" stroke={isFocus ? '#7d93ad' : '#3b4d68'}
+                          strokeWidth="1" opacity={isFocus ? 0.98 : 0.92} />
+                        <text x={bx + w / 2} y={by + 14} textAnchor="middle" fontSize="11"
+                          fill={isFocus ? '#e5edf7' : '#a8b8cc'}
+                          fontWeight={isFocus ? '700' : '400'}>{p.title}</text>
+                      </g>
+                    );
+                  })}
+                </g>
+              );
+            }
+
             const focusId = hoveredId || selectedEventId;
             if (!focusId) return null;
             const ids = new Set([focusId]);
@@ -256,7 +373,6 @@ export function SequentialFlow({
               if (a.from === focusId) ids.add(a.to);
               if (a.to === focusId) ids.add(a.from);
             }
-            const rightEdge = LABEL_COL + plotW + rightPad;
             const drawn = [];
             const boxes = [];
             // focus を先に配置（最優先の位置を取らせる）
@@ -300,22 +416,48 @@ export function SequentialFlow({
         </svg>
       </div>
 
-      {/* legend */}
+      {/* legend: kind ごと・edge type ごとのチェックで表示/非表示。Event names でラベル常時表示。
+          どの行も同じ並び: ✅ checkbox → 色/形の記号 → カテゴリ名。 */}
       <div className="seqflow-legend">
         {Object.entries(SEQ_KINDS).map(([k, v]) => (
-          <span key={k} className="sf-key"><span className="sf-dot" style={{ background: v.color }} /> {v.label}</span>
+          <label key={k} className="sf-key sf-check" title={`Show / hide ${v.label} nodes`}>
+            <input type="checkbox" checked={!hiddenKinds.has(k)} onChange={() => toggleKind(k)} />
+            <KindIcon kind={v} size={12} /> {v.label}
+          </label>
         ))}
-        <span className="sf-key"><span className="sf-line" /> direct cause</span>
-        <span className="sf-key"><span className="sf-line dashed" /> enabling / blind-spot</span>
+        <label className="sf-key sf-check" title="Show / hide direct-cause edges">
+          <input type="checkbox" checked={!hiddenEdgeTypes.has('direct')}
+            onChange={() => toggleEdgeType('direct')} />
+          <span className="sf-line" /> direct cause
+        </label>
+        <label className="sf-key sf-check" title="Show / hide enabling / blind-spot edges">
+          <input type="checkbox" checked={!hiddenEdgeTypes.has('enabling')}
+            onChange={() => toggleEdgeType('enabling')} />
+          <span className="sf-line dashed" /> enabling / blind-spot
+        </label>
+        <label className="sf-key sf-check" title="Keep every event name visible instead of showing it on hover">
+          <input type="checkbox" checked={alwaysShowLabels}
+            onChange={e => setAlwaysShowLabels(e.target.checked)} />
+          Event names
+        </label>
       </div>
 
       {/* click → detail（英語1文）＋ 決定的に関連する message */}
       {selEvent && (
         <div className="seqflow-detail">
           <div className="sf-detail-head">
-            <span className="sf-badge" style={{ background: selKind.color }} />
+            <span className="sf-badge"><KindIcon kind={selKind} size={20} /></span>
             <b>{selEvent.title}</b>
             <span className="sf-kind" style={{ color: selKind.color, borderColor: selKind.color }}>{selKind.label}</span>
+            {involvedAgents.length > 0 && (
+              <span className="sf-agents">
+                {involvedAgents.map(a => (
+                  <span key={a.agent_id} className="sf-agent-chip" title={a.agent_label}>
+                    <AgentIcon id={a.agent_id} size={14} /> {a.agent_label}
+                  </span>
+                ))}
+              </span>
+            )}
             <span className="muted small">{selEvent.time.replace('T', ' ')}</span>
             <span className="sf-close" role="button" title="Close" onClick={() => onSelectEvent(selEvent.id)}>✕</span>
           </div>

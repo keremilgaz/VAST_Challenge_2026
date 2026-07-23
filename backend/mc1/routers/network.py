@@ -142,6 +142,89 @@ def network(
     ORDER BY weight DESC
     """
 
+    # ── エージェント単位の mention 状況集計（未返信 mention 警告用）──
+    # 候補抽出は既存の mention_query と同じ「明示的な名前呼びかけ」条件を使う:
+    #   - content 冒頭で対象エージェント t を名前で呼ぶ（$vocative_patterns[t]）
+    #   - mention 元メッセージ m には現在の network filter を全て適用する
+    #     （common_where_clause: merger / keyword / message_types / visibility /
+    #      text_sources / time range）。
+    # 注意: mention_query が持つ
+    #   `NOT (m)-[:REPLIES_TO]->(:Message {agent_id: t.agent_id})`
+    # という除外（= 破線 edge と実線 reply edge の二重描画防止）はここでは使わない。
+    # m 自身が resolve_parent_links の「addressed」ルールで t の古い発言へ
+    # REPLIES_TO を持つケース（responding_to が "@<tのrole>" の呼びかけ）まで
+    # 除外してしまうと、t が一度も返信していなくても mention 候補から消えてしまう。
+    #
+    # answered の判定基準（実データ検証の上で決定 — REPLIES_TO 厳密一致ではなく「沈黙」基準）:
+    #   当初は「t 自身が m へ REPLIES_TO を張った直接返信」だけを answered としていたが、
+    #   実データ全体（912件）で検証したところ、この基準だと全 mention の 71% が
+    #   unanswered になった。原因は resolve_parent_links の addressed 解決が
+    #   「返信時点で対象の最も新しい発言」にしか REPLIES_TO を繋がないため、矢継ぎ早に
+    #   複数回名指しされてから一度だけまとめて反応する（このデータセットで頻出のパターン）
+    #   と、まとめ返信より前の呼びかけが構造的に永遠に unanswered として残ってしまうこと。
+    #   これでは legal_agent や pr_agent のような単に発言頻度が高いだけのエージェントも
+    #   常時赤くなり、「本当に無視して事態を悪化させている」（例: Platform-Trust が
+    #   2046-06-05 09:00-11:00 に沈黙、Judge-Agent が同日 15:08 以降ずっと沈黙）を見分ける
+    #   異常検知にならなかった。
+    #   そこで answered は「m より後、選択中の end_time 以前に、t が（内容を問わず）
+    #   何かメッセージを送っているか」で判定する（= 呼びかけられた後も本当に沈黙しているか
+    #   だけを見る）。実データで Platform-Trust 09:00-11:00 window と Judge-Agent
+    #   16:00 以降 window の両方を正しく検知し、時間範囲を広げて対象が発言を再開した
+    #   時点で answered に切り替わることを確認済み。返信側 (t の以後のメッセージ) には
+    #   表示フィルターを一切適用しない — keyword 等で非表示になっているだけの発言を
+    #   「沈黙」と誤判定しないため。
+    #
+    # 追加の絞り込み（「再呼びかけによる確認」）:
+    #   沈黙ベース判定には既知の限界がある — 選択中の window の終端ぎりぎりで
+    #   メンションされた場合、対象がどれだけ応答が早いエージェントでも「まだ返信する
+    #   時間がなかっただけ」で unanswered になってしまう（境界での誤判定）。これを
+    #   新しい時間定数（猶予期間）を導入せずに減らすため、「同じ t への、より後の
+    #   （かつ選択中の end_time 以前の）明示的な呼びかけがもう1件存在するか」を
+    #   確認材料として使う。これが存在する = 他の誰かが「まだ返信がない」と気づいて
+    #   再度呼びかけたという構造的な証拠であり、末尾の1件（それ以降誰も呼びかけて
+    #   いない、境界誤判定が起きやすい1件）だけを unanswered から除外できる。
+    #   実データで確認済み: Platform-Trust(09:00-11:00) は4件中3件、Judge-Agent
+    #   (16:00以降) は12件中11件が「再呼びかけあり」で confirmed unanswered のまま
+    #   残り、全体件数はほぼ変わらず赤フラグは引き続き正しく立つ。
+    # 集計は message 単位（count(DISTINCT m)）なので、同じ mention に複数返信があっても、
+    # channel 別に集約されても二重計上されない。
+    #   mention_count          = 明示的にメンションされた異なる message 数
+    #   answered_mention_count = そのうち t がそれ以降に何か発言しているか、
+    #                            または再呼びかけによる確認が取れなかった数
+    #   unanswered_mention_count = mention_count - answered_mention_count
+    mention_status_query = f"""
+    MATCH (sender:Agent)-[:SENT]->(m:Message)
+    MATCH (t:Agent)
+    WHERE sender.agent_id <> t.agent_id
+      AND coalesce(m.content, '') =~ coalesce($vocative_patterns[t.agent_id], 'a^')
+      {common_where_clause()}
+    OPTIONAL MATCH (t)-[:SENT]->(reply:Message)
+      WHERE reply.timestamp_raw > m.timestamp_raw
+        AND ($end_time = '' OR reply.timestamp_raw <= $end_time)
+    WITH t, m AS mention_message, count(reply) AS reply_count
+    OPTIONAL MATCH (sender2:Agent)-[:SENT]->(m:Message)
+      WHERE reply_count = 0
+        AND sender2.agent_id <> t.agent_id
+        AND coalesce(m.content, '') =~ coalesce($vocative_patterns[t.agent_id], 'a^')
+        AND m.timestamp_raw > mention_message.timestamp_raw
+        AND ($end_time = '' OR m.timestamp_raw <= $end_time)
+        {common_where_clause()}
+    WITH t.agent_id AS id,
+         coalesce(t.agent_label, t.agent_id) AS label,
+         mention_message,
+         reply_count,
+         count(m) AS later_unanswered_mention_count
+    WITH id, label,
+         count(DISTINCT mention_message) AS mention_count,
+         count(DISTINCT CASE WHEN reply_count > 0 OR later_unanswered_mention_count = 0
+                             THEN mention_message END) AS answered_mention_count
+    RETURN id, label,
+           mention_count AS mention_count,
+           answered_mention_count AS answered_mention_count,
+           mention_count - answered_mention_count AS unanswered_mention_count
+    ORDER BY id
+    """
+
     params = dict(
         merger_only=merger_only,
         message_types=selected_message_types,
@@ -159,6 +242,7 @@ def network(
         edges = [dict(r) for r in session.run(edge_query, **params)]
         received_rows = [dict(r) for r in session.run(received_query, **params)]
         mention_rows = [dict(r) for r in session.run(mention_query, **params)]
+        mention_status_rows = [dict(r) for r in session.run(mention_status_query, **params)]
 
     # mention edge を通常 edge に追加（frontend は channel='mention' を破線で描く）
     for r in mention_rows:
@@ -180,6 +264,32 @@ def network(
                 "merger_related_count": 0,
                 "received_count": r["received_count"],
             })
+
+    # ── mention 状況を node に反映（未返信 mention 警告用の新フィールド）──
+    # 既存フィールドは削除せず、後方互換の追加だけを行う。値が無い場合は必ず 0 を
+    # 入れる（null / 欠落にしない）。現在の時間範囲でメッセージを 1 件も送っていない
+    # エージェントでも、未返信 mention があれば node として追加する（received_count 由来の
+    # node 追加は温存する）。
+    mention_status_by_id = {r["id"]: r for r in mention_status_rows}
+    node_ids = {n["id"] for n in nodes}
+    for n in nodes:
+        ms = mention_status_by_id.get(n["id"], {})
+        n["mention_count"] = ms.get("mention_count", 0) or 0
+        n["answered_mention_count"] = ms.get("answered_mention_count", 0) or 0
+        n["unanswered_mention_count"] = ms.get("unanswered_mention_count", 0) or 0
+    for r in mention_status_rows:
+        if r["id"] not in node_ids and (r.get("unanswered_mention_count", 0) or 0) > 0:
+            nodes.append({
+                "id": r["id"],
+                "label": r["label"],
+                "message_count": 0,
+                "merger_related_count": 0,
+                "received_count": received_by_id.get(r["id"], {}).get("received_count", 0),
+                "mention_count": r.get("mention_count", 0) or 0,
+                "answered_mention_count": r.get("answered_mention_count", 0) or 0,
+                "unanswered_mention_count": r.get("unanswered_mention_count", 0) or 0,
+            })
+            node_ids.add(r["id"])
 
     # cellのsentiment同様、node単位のsentimentもBERTで計算する
     # node別にfilter後のtextを集めてsentimentを計算

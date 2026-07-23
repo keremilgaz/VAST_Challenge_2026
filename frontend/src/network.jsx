@@ -82,11 +82,13 @@ function edgeWidth(w, maxW) {
   return Math.max(1.4, 1.4 + norm * 7);
 }
 
+// 発散配色: 負=赤 / 0=灰 / 正=青。赤緑は1型・2型色覚で混同されやすいため、
+// 緑ではなく青(#378ADD、comms_huddleチャンネル色と同じ既存の識別色)を正の極に使う。
 function sentimentColor(s) {
   if (s === null || s === undefined) return '#3a4a5e';
   if (s >= 0) {
     const t = Math.min(1, s);
-    return d3.interpolateRgb('#9aa7b5', '#4ade80')(t);
+    return d3.interpolateRgb('#9aa7b5', '#378ADD')(t);
   }
   const t = Math.min(1, -s);
   return d3.interpolateRgb('#9aa7b5', '#e24b4a')(t);
@@ -206,13 +208,17 @@ export default function NetworkVisualization({
       n.broadcast_count = Math.max(0, (n.message_count || 0) - all);   // gerçek non-reply
     });
 
-    // ── "silent / unresponsive" agent tespiti ──
-    // Heatmap'te görünen ama network'te görünmeyen durum: agent'a bu zaman
-    // aralığında mesaj GELİYOR (received_count > 0) ama kendisi hiç mesaj
-    // GÖNDERMİYOR (message_count === 0). Backend artık bu node'ları da
-    // döndürüyor; burada işaretleyip kırmızı uyarı ring'i + chip ile çiziyoruz.
+    // ── "未返信 mention" 警告フラグの判定 ──
+    // このエージェントが現在のフィルター/時間範囲内で名前で明示的にメンションされ
+    // （破線 mention edge と同じ定義）、その mention 元メッセージに対して直接返信して
+    // いない場合に赤フラグを立てる（backend が unanswered_mention_count として集計）。
+    // 本人が無関係なメッセージを送っていても（message_count > 0）、メンションに返信して
+    // いなければ警告する。逆に、単に受信しただけ / 通常 reply を受けただけでは警告しない。
+    // 既存の赤リング・警告チップ・点滅アニメーション・CSS(.silent / .n-silent-*) を
+    // そのまま再利用するため、同じ値を silent フラグにも入れる。
     nodes.forEach(n => {
-      n.silent = (n.message_count || 0) === 0 && (n.received_count || 0) > 0;
+      n.has_unanswered_mentions = (n.unanswered_mention_count || 0) > 0;
+      n.silent = n.has_unanswered_mentions;
     });
 
     // ── 有向グラフ用の offset 計算 ──
@@ -363,8 +369,9 @@ export default function NetworkVisualization({
       .attr('fill', '#0b1626').attr('stroke-width', 1).attr('stroke-dasharray', '3 2').attr('pointer-events', 'none');
     nodeEnter.append('text').attr('class', 'n-hr-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace')
       .attr('font-size', 9).attr('font-weight', 700).attr('pointer-events', 'none');
-    // "silent / unresponsive" uyarısı: kırmızı pulse'lı dış ring + alt-orta chip
-    // (mesaj alıyor ama bu zaman aralığında hiç göndermiyor)
+    // "未返信 mention" 警告: 赤い pulse 付き外周 ring + 下部中央 chip
+    // （名前で明示的にメンションされたが、その元メッセージに直接返信していない）
+    // 既存の CSS クラス名 (.n-silent-*) はスタイル崩れを避けるためそのまま再利用する。
     nodeEnter.append('circle').attr('class', 'n-silent-ring').attr('fill', 'none')
       .attr('stroke', '#e24b4a').attr('stroke-width', 2).attr('pointer-events', 'none');
     nodeEnter.append('rect').attr('class', 'n-silent-rect').attr('rx', 6.5).attr('height', 13)
@@ -375,11 +382,15 @@ export default function NetworkVisualization({
     nodeEnter.append('text').attr('class', 'n-rank-txt').attr('text-anchor', 'middle').attr('font-family', 'monospace').attr('font-size', 9.5).attr('font-weight', 800).attr('fill', '#dbe7f5').attr('pointer-events', 'none');
 
     const nodeSel = nodeEnter.merge(nodeData);
-    nodeSel.classed('silent', d => !!d.silent);
-    nodeSel.select('.n-silent-ring').style('display', d => d.silent ? null : 'none');
-    nodeSel.select('.n-silent-rect').style('display', d => d.silent ? null : 'none');
-    nodeSel.select('.n-silent-txt').style('display', d => d.silent ? null : 'none')
-      .text(d => d.silent ? `⚠ ${d.received_count} in · 0 out` : '');
+    // 既存 CSS クラス .silent / .n-silent-* をそのまま再利用（意味は「未返信 mention 有り」）。
+    nodeSel.classed('silent', d => d.has_unanswered_mentions);
+    nodeSel.select('.n-silent-ring').style('display', d => d.has_unanswered_mentions ? null : 'none');
+    nodeSel.select('.n-silent-rect').style('display', d => d.has_unanswered_mentions ? null : 'none');
+    nodeSel.select('.n-silent-txt').style('display', d => d.has_unanswered_mentions ? null : 'none')
+      .text(d => {
+        const u = d.unanswered_mention_count || 0;
+        return d.has_unanswered_mentions ? `⚠ ${u} unanswered mention${u === 1 ? '' : 's'}` : '';
+      });
     nodeSel.select('.n-ring').attr('stroke', nodeStroke);
     nodeSel.select('.n-glow').attr('fill', nodeStroke).style('display', d => d.silent ? 'none' : null);
     nodeSel.select('.n-circle').attr('stroke', nodeStroke)
@@ -398,7 +409,7 @@ export default function NetworkVisualization({
       .attr('opacity', d => d.silent ? 0.55 : 1);
     nodeSel.select('.n-icon-bg')
       .style('display', d => (hasIcon(d) && (isSentiment || d.silent)) ? null : 'none');
-    nodeSel.select('.n-label').text(d => d.silent ? `${d.label} (unresponsive)` : d.label);
+    nodeSel.select('.n-label').text(d => d.label);
     // abbr を廃したので、agent 名は hover 時だけでなく常時表示する。
     // （アイコン単体では個体を同定できない ＝ 名前が唯一の同定手段になるため）
     nodeSel.select('.n-label').attr('opacity', 1);
@@ -436,12 +447,15 @@ export default function NetworkVisualization({
       .on('click', (ev, n) => { ev.stopPropagation(); onSelectNode && onSelectNode(n.id); })
       .on('mouseenter', function (ev, n) {
         showTT(ev, `<div class="tt-name" style="color:#dfe7f0">${n.label}</div>
-          ${n.silent ? `<div class="tt-row"><span class="tt-k" style="color:#e24b4a">⚠ UNRESPONSIVE</span><span class="tt-v" style="color:#ff8a80">receives, never replies</span></div>` : ''}
+          ${n.has_unanswered_mentions ? `<div class="tt-row"><span class="tt-k" style="color:#e24b4a">⚠ ${n.unanswered_mention_count || 0} unanswered mention${(n.unanswered_mention_count || 0) === 1 ? '' : 's'}</span><span class="tt-v" style="color:#ff8a80">mentioned by name, not replied to</span></div>` : ''}
           <div class="tt-row"><span class="tt-k">Messages sent</span><span class="tt-v">${n.message_count}</span></div>
           <div class="tt-row"><span class="tt-k">Messages received (addressed/replied to)</span><span class="tt-v">${n.received_count ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;replies shown as edges</span><span class="tt-v">${n.replies_sent ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u21a9 replies, partner hidden</span><span class="tt-v">${n.hidden_replies ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;\u25cc non-reply (broadcast/root)</span><span class="tt-v">${n.broadcast_count ?? 0}</span></div>
+          <div class="tt-row"><span class="tt-k">Explicit mentions</span><span class="tt-v">${n.mention_count ?? 0}</span></div>
+          <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;Answered mentions</span><span class="tt-v">${n.answered_mention_count ?? 0}</span></div>
+          <div class="tt-row"><span class="tt-k">&nbsp;&nbsp;Unanswered mentions</span><span class="tt-v">${n.unanswered_mention_count ?? 0}</span></div>
           <div class="tt-row"><span class="tt-k">Merger-related</span><span class="tt-v">${n.merger_related_count}</span></div>
           <div class="tt-row"><span class="tt-k">Sentiment score</span><span class="tt-v">${n.bert_sentiment_score == null ? '\u2014' : n.bert_sentiment_score.toFixed(2)}</span></div>`);
         highlightNode(n.id);
@@ -534,16 +548,17 @@ export default function NetworkVisualization({
         const bw = t.length * 6.5 + 10;
         d3.select(this).attr('x', -(d.r - 2) - bw / 2).attr('y', d.r + 4.5);
       });
-      // "silent / unresponsive" chip'i: node'un alt-ortası (label ile çakışmayacak şekilde)
+      // "未返信 mention" 警告 chip'i: node'un alt-ortası (label ile çakışmayacak şekilde)
       nodeSel.select('.n-silent-rect').each(function (d) {
-        if (!d.silent) return;
-        const t = `⚠ ${d.received_count} in · 0 out`;
+        if (!d.has_unanswered_mentions) return;
+        const u = d.unanswered_mention_count || 0;
+        const t = `⚠ ${u} unanswered mention${u === 1 ? '' : 's'}`;
         const bw = t.length * 6.5 + 10;
         const top = d.y > H - 160 ? d.r + 8 : d.r + 21; // label üstteyse chip node'a yakın durabilir
         d3.select(this).attr('width', bw).attr('x', -bw / 2).attr('y', top);
       });
       nodeSel.select('.n-silent-txt').each(function (d) {
-        if (!d.silent) return;
+        if (!d.has_unanswered_mentions) return;
         const top = d.y > H - 160 ? d.r + 8 : d.r + 21;
         d3.select(this).attr('x', 0).attr('y', top + 10.5);
       });
@@ -611,7 +626,7 @@ export default function NetworkVisualization({
     channelTotals[key] = (channelTotals[key] || 0) + (e.weight || 0);
   });
   const legendChannels = Object.keys(CHANNELS).filter(ch => channelTotals[ch] > 0);
-  const hasSilent = (data?.nodes || []).some(n => (n.message_count || 0) === 0 && (n.received_count || 0) > 0);
+  const hasSilent = (data?.nodes || []).some(n => (n.unanswered_mention_count || 0) > 0);
 
   return (
     <div className="net-wrap">
@@ -632,8 +647,8 @@ export default function NetworkVisualization({
           </span>
         )) : <span className="nl-item">Edge color = channel · node size = messages · hover for name</span>}
         {hasSilent && (
-          <span className="nl-item nl-silent" title="This agent is addressed / replied to in the current time window but sends zero messages — it has gone silent (unresponsive). The red pulsing ring marks it; ⚠ chip shows incoming count.">
-            <span className="nl-dot" style={{ borderColor: '#e24b4a' }} /> ⚠ unresponsive = receives msgs, sends none
+          <span className="nl-item nl-silent" title="The red warning marks an agent who was explicitly mentioned by name in the selected window but has not directly replied to one or more of those messages. The red pulsing ring marks it; the ⚠ chip shows the number of unanswered mentions.">
+            <span className="nl-dot" style={{ borderColor: '#e24b4a' }} /> ⚠ unanswered mention = mentioned by name, no direct reply
           </span>
         )}
       </div>

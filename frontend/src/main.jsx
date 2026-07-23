@@ -935,7 +935,7 @@ const HELP_EXTERNAL_CHANNEL = 'Public posts have no recipients, so they never ap
               {/* legend */}
               <div className="legend">
                 {heatmapMode === 'count' && <span className="muted small">Fewer <span className="lg-swatch" style={{ background: '#e3eefb' }} /><span className="lg-swatch" style={{ background: '#93beec' }} /><span className="lg-swatch" style={{ background: '#558fd8' }} /><span className="lg-swatch" style={{ background: '#1a5cc0' }} /> more messages · log scale · <span className="lg-swatch" style={{ background: '#10202f' }} /> empty</span>}
-                {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> −1 negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> 0 neutral <span className="lg-swatch" style={{ background: '#4ade80' }} /> +1 positive<span className="kw-help" tabIndex={0} title={HELP_SENTIMENT_SCALE} aria-label={HELP_SENTIMENT_SCALE}>?</span></span>}
+                {heatmapMode === 'sentiment' && <span className="muted small"><span className="lg-swatch" style={{ background: '#e24b4a' }} /> −1 negative <span className="lg-swatch" style={{ background: '#9aa7b5' }} /> 0 neutral <span className="lg-swatch" style={{ background: '#378ADD' }} /> +1 positive<span className="kw-help" tabIndex={0} title={HELP_SENTIMENT_SCALE} aria-label={HELP_SENTIMENT_SCALE}>?</span></span>}
               </div>
 
 

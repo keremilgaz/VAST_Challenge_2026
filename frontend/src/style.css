@@ -195,8 +195,9 @@ summary { cursor: pointer; }
 .seqflow-scroll { overflow-x: auto; width: 100%; padding-bottom: 2px; }
 .seqflow-svg { display: block; min-width: max-content; }
 .seqflow-legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
-.sf-key { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #c3cee0; }
-.sf-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; }
+.sf-key { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 11px; color: #c3cee0; }
+.sf-check { cursor: pointer; user-select: none; }
+.sf-check input[type="checkbox"] { width: 12px; height: 12px; margin: 0; cursor: pointer; accent-color: #6cb0f5; }
 .sf-line { display: inline-block; width: 20px; height: 0; border-top: 2px solid #8fb2d8; }
 .sf-line.dashed { border-top: 2px dashed #a78bfa; }
 .seqflow-detail { margin-top: 12px; border-top: 1px solid #263244; padding-top: 10px; }
@@ -204,6 +205,8 @@ summary { cursor: pointer; }
 .sf-detail-head b { color: #e5edf7; font-size: 15px; }
 .sf-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; color: #0b1622; font-weight: 700; font-size: 13px; }
 .sf-kind { border: 1px solid; border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+.sf-agents { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sf-agent-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #a8b8cc; }
 .sf-close { margin-left: auto; cursor: pointer; color: #7a8aa0; padding: 0 4px; }
 .sf-close:hover { color: #cbd5e1; }
 .sf-detail-text { color: #c8d4e2; font-size: 13px; line-height: 1.6; margin: 8px 0 12px; }
