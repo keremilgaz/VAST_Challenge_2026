@@ -18,14 +18,17 @@ cd "$(dirname "$0")"
 
 : "${TF_VAR_neo4j_password:?set it first: export TF_VAR_neo4j_password='...'}"
 
+# Passed with -var, not TF_VAR_image_tag: environment variables rank BELOW
+# terraform.tfvars in Terraform's precedence order, so the tfvars value would
+# silently win over the tag being deployed here.
 IMAGE_TAG="${IMAGE_TAG:-v1}"
-export TF_VAR_image_tag="$IMAGE_TAG"
 
 echo "==> 1/4  terraform init"
 terraform init -input=false
 
 echo "==> 2/4  registry layer only"
 terraform apply -input=false -auto-approve \
+  -var "image_tag=$IMAGE_TAG" \
   -target=azurerm_resource_group.main \
   -target=azurerm_container_registry.main
 
@@ -55,7 +58,7 @@ for image in vast-backend vast-frontend; do
 done
 
 echo "==> 4/4  full infrastructure"
-terraform apply -input=false
+terraform apply -input=false -var "image_tag=$IMAGE_TAG"
 
 echo
 terraform output

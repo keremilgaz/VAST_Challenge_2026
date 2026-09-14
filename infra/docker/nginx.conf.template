@@ -23,6 +23,12 @@ server {
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
+
+        # Container Apps ingress terminates TLS per hostname and refuses a
+        # handshake without SNI, which nginx does not send by default -
+        # without this the proxy answers 502.
+        proxy_ssl_server_name on;
+        proxy_ssl_protocols   TLSv1.2 TLSv1.3;
     }
 
     location /admin/ {
@@ -32,6 +38,12 @@ server {
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
+
+        # Container Apps ingress terminates TLS per hostname and refuses a
+        # handshake without SNI, which nginx does not send by default -
+        # without this the proxy answers 502.
+        proxy_ssl_server_name on;
+        proxy_ssl_protocols   TLSv1.2 TLSv1.3;
     }
 
     location / {
