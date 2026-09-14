@@ -1,0 +1,14 @@
+# terraform.tfvars.example
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is git-ignored. Never put the password in this file;
+# pass it through the environment instead:
+#   export TF_VAR_neo4j_password='...'
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+project         = "vast"
+environment     = "dev"
+location        = "westeurope"
+owner           = "kerem.ilgaz"
+image_tag       = "v1"

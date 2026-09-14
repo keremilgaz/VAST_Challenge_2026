@@ -17,3 +17,16 @@ logs
 dist
 .vscode
 .idea
+
+# Recursive patterns (the bare names above only match the context root).
+# Needed for the root-context builds in infra/docker/.
+**/node_modules
+**/dist
+**/__pycache__
+**/.terraform
+**/*.tfstate*
+infra/terraform.tfvars
+submission
+*.png
+*.jpeg
+_tmp_*

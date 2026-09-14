@@ -20,3 +20,14 @@ venv/
 # Env
 .env
 .env.local
+
+# Terraform
+.terraform/
+# .terraform.lock.hcl is intentionally committed (provider version pinning)
+*.tfstate
+*.tfstate.*
+crash.log
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
