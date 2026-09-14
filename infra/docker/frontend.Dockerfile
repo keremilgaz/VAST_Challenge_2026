@@ -13,8 +13,12 @@ RUN npm ci --no-audit --no-fund
 
 COPY frontend/ ./
 
-# Left empty on purpose: the app calls its own origin and nginx proxies /api.
-ENV VITE_API_BASE_URL=""
+# "." rather than "": the app reads
+#   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+# and an empty string is falsy, so it would fall back to localhost. A single dot
+# makes every call relative ("./api/options" -> "/api/options") and nginx below
+# proxies it to the backend, so the image needs no backend URL at build time.
+ENV VITE_API_BASE_URL="."
 RUN npm run build
 
 FROM nginx:1.27-alpine
