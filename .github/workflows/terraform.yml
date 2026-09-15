@@ -1,0 +1,60 @@
+name: terraform
+
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/terraform.yml"]
+  pull_request:
+    paths: ["infra/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fmt / validate / lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # Runs without Azure credentials thanks to -backend=false
+      - name: terraform init (no backend)
+        run: terraform init -backend=false -input=false
+        working-directory: infra
+
+      - name: terraform validate
+        run: terraform validate -no-color
+        working-directory: infra
+
+      - name: bootstrap validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate -no-color
+        working-directory: infra/bootstrap
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: tflint
+        run: |
+          tflint --init
+          tflint --recursive -f compact
+        working-directory: infra
+
+      - name: checkov (IaC security scan)
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra
+          framework: terraform
+          quiet: true
+          soft_fail: true
