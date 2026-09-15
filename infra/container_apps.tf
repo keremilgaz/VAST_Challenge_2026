@@ -102,11 +102,15 @@ resource "azurerm_container_app" "api" {
       # On a cold start Neo4j needs to come up and the MC1 JSON is imported,
       # which can take a few minutes - the probes are relaxed accordingly.
       liveness_probe {
-        transport        = "HTTP"
-        port             = 8000
-        path             = "/api/health"
-        initial_delay    = 90
-        interval_seconds = 30
+        transport = "HTTP"
+        port      = 8000
+        path      = "/api/health"
+        # 60 is the maximum the API accepts. The first start is slow (Neo4j
+        # boot + MC1 import), so tolerance comes from the failure threshold
+        # instead: 60s + 10 x 30s before a restart.
+        initial_delay           = 60
+        interval_seconds        = 30
+        failure_count_threshold = 10
       }
 
       readiness_probe {

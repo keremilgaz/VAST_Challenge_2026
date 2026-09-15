@@ -38,6 +38,29 @@ cleanup possible later.
                                   Azure Files (neo4j-data)
 ```
 
+## Live deployment
+
+Deployed to `https://ca-vast-dev-web.<env-id>.francecentral.azurecontainerapps.io`.
+The stack is brought up on demand and destroyed afterwards: a student
+subscription has a fixed credit and the `api` app cannot scale to zero, because
+Neo4j has to stay resident. `deploy.sh` rebuilds the whole thing in about ten
+minutes, which is the point of having it as code.
+
+![The resource group provisioned by Terraform](docs/azure-resource-group.png)
+
+Everything in `rg-vast-dev-frc` was created by `terraform apply`, carries the
+common tag set, and is removed again by a single `terraform destroy`.
+
+![The dashboard running on Azure Container Apps](docs/azure-overview.png)
+
+Heatmap, crisis timeline and event flow, served from the `web` container app,
+with `/api/*` proxied to the FastAPI backend in the `api` app.
+
+![Side-by-side heatmap and communication network](docs/azure-side-by-side.png)
+
+Side-by-side view: the reply graph and the message detail panel, both reading
+from the Neo4j sidecar over `bolt://localhost:7687`.
+
 ## Prerequisites
 
 ```bash
@@ -155,6 +178,29 @@ Two workflows:
   also runs on forks.
 - `.github/workflows/images.yml` — builds and publishes the two container
   images (see above). Also runnable on demand with a custom tag.
+
+## Notes from getting this running
+
+Four platform constraints shaped this configuration, all specific to a student
+subscription or to Container Apps:
+
+1. **Region policy.** `RequestDisallowedByAzure` on West Europe, North Europe,
+   Sweden Central, UK South and East US; France Central was permitted. The
+   region is a variable and its short code is derived in `locals.tf`, so moving
+   the stack is a one-line change.
+2. **ACR Tasks disabled.** `az acr build` returns `TasksOperationsNotAllowed`,
+   which is why images are built in CI and copied in with `az acr import`.
+3. **Resource provider registration.** `Microsoft.App` had to be registered on
+   the subscription before a Container Apps environment could be created:
+   `az provider register --namespace Microsoft.App --wait`.
+4. **SNI on the reverse proxy.** Container Apps ingress terminates TLS per
+   hostname and rejects a handshake without SNI, which nginx does not send by
+   default - `/api/*` answered 502 until `proxy_ssl_server_name on`.
+
+One application detail matters too: the frontend reads
+`import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'`. An empty string
+is falsy, so the image sets it to `.` instead - every call becomes relative,
+nginx proxies it, and the image stays independent of the backend URL.
 
 ## Known simplifications
 
