@@ -45,7 +45,11 @@ jobs:
         with:
           tflint_version: latest
 
+      # GITHUB_TOKEN so `tflint --init` downloads the azurerm ruleset as an
+      # authenticated request - anonymous downloads hit the API rate limit.
       - name: tflint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tflint --init
           tflint --recursive -f compact
