@@ -33,6 +33,12 @@ GitHub Actions workflows that build the container images and lint/validate the
 Terraform on every pull request. Nothing in this directory is required to run
 the project locally.
 
+![Azure resources created by Terraform](infra/docs/azure-resource-group.png)
+
+*The full stack, provisioned by a single `terraform apply` and removed again by
+`terraform destroy`. More screenshots and the deployment walkthrough are in
+[`infra/README.md`](infra/README.md).*
+
 ## Quick start
 
 ```bash
